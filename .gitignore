@@ -1,0 +1,40 @@
+# Python and build output
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.uv-cache/
+
+# Credentials and browser session material
+.env
+.env.*
+auth.json
+auth*.json
+*auth-state*.json
+*storage-state*.json
+*storage_state*.json
+*storageState*.json
+credentials*.json
+secrets/
+.sleeper-sdk/
+.auth/
+playwright/.auth/
+browser-profile*/
+browser-data/
+user-data-dir/
+profiles/
+screenshots/
+screenshot*.png
+screenshot*.jpg
+traces/
+playwright-report/
+test-results/
+*.har
+trace*.zip
+
+# Local editor and operating system files
+.DS_Store
+.idea/
+.vscode/
