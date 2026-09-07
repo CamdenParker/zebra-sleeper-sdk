@@ -1,7 +1,7 @@
 [project]
 name = "sleeper-sdk"
 version = "0.1.0"
-description = "Two async helpers for Sleeper login and verified lineup swaps."
+description = "Async helpers for Sleeper login, verified lineup swaps, and read-only team reports."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

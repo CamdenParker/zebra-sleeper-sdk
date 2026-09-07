@@ -64,6 +64,171 @@ def _lineup(rows, roster_id: int, source: str) -> list[str]:
     )
 
 
+async def _players(client: httpx.AsyncClient) -> dict:
+    """Read Sleeper's full NFL player list, including eligible fantasy positions."""
+    players = await _get(client, "players/nfl")
+    if (
+        not isinstance(players, dict)
+        or not players
+        or any(
+            not isinstance(player_id, str)
+            or not player_id
+            or not isinstance(record, dict)
+            for player_id, record in players.items()
+        )
+    ):
+        raise RuntimeError("Sleeper did not return valid player data.")
+    return players
+
+
+async def _projections(client: httpx.AsyncClient, season: str, week: int) -> dict:
+    """Read Sleeper's weekly player projections, keyed by player ID.
+
+    The endpoint is not officially documented; without the season-type path
+    segment Sleeper serves a payload whose entries are all empty.
+    """
+    projections = await _get(client, f"projections/nfl/regular/{season}/{week}")
+    if (
+        not isinstance(projections, dict)
+        or not projections
+        or any(
+            not isinstance(player_id, str)
+            or not player_id
+            or not isinstance(record, dict)
+            for player_id, record in projections.items()
+        )
+    ):
+        raise RuntimeError("Sleeper did not return valid projection data.")
+    if not any(
+        points_field in record
+        for record in projections.values()
+        for points_field in ("pts_std", "pts_half_ppr", "pts_ppr")
+    ):
+        raise RuntimeError("Sleeper returned no usable projections for the week.")
+    return projections
+
+
+async def _team_snapshot(
+    client: httpx.AsyncClient, league_id: str, user_id: str, week: int | None
+) -> dict:
+    """Resolve the user's unique roster and reporting week without lineup checks."""
+    if (
+        not isinstance(league_id, str)
+        or not league_id.isascii()
+        or not league_id.isdigit()
+    ):
+        raise ValueError("league_id must be a numerical Sleeper ID string.")
+    if not isinstance(user_id, str) or not user_id.isascii() or not user_id.isdigit():
+        raise ValueError("user_id must be a numerical Sleeper ID string.")
+    if week is not None and (type(week) is not int or not 1 <= week <= 18):
+        raise ValueError("week must be an integer between 1 and 18.")
+    league, rosters, state = await asyncio.gather(
+        _get(client, f"league/{league_id}"),
+        _get(client, f"league/{league_id}/rosters"),
+        _get(client, "state/nfl"),
+    )
+    if not isinstance(league, dict) or league.get("league_id") != league_id:
+        raise RuntimeError("Sleeper did not return the requested league.")
+    if not isinstance(state, dict):
+        raise RuntimeError("Sleeper did not return the current NFL state.")
+    if league.get("sport") != "nfl" or league.get("season_type") != "regular":
+        raise ValueError("Only NFL regular-season leagues are supported.")
+    settings = league.get("settings")
+    if (
+        not isinstance(settings, dict)
+        or settings.get("best_ball", 0) != 0
+        or settings.get("type") not in (0, 1, 2)
+    ):
+        raise ValueError(
+            "Only Classic redraft, keeper, and dynasty lineups are supported."
+        )
+    if league.get("status") != "in_season" and not (
+        league.get("status") == "pre_draft" and settings.get("type") == 2
+    ):
+        raise ValueError("The league must be active, or a renewed pre-draft dynasty.")
+    season = state.get("season")
+    if (
+        not isinstance(season, str)
+        or not season.isdigit()
+        or league.get("season") != season
+    ):
+        raise ValueError("The league must belong to the current NFL season.")
+    if week is None:
+        week = state.get("display_week")
+        if type(week) is not int or not 1 <= week <= 18:
+            raise RuntimeError("Sleeper has no supported current lineup week.")
+    positions = league.get("roster_positions")
+    if not isinstance(positions, list) or any(
+        not isinstance(position, str) or position not in _SLOTS | {"BN"}
+        for position in positions
+    ):
+        raise ValueError("The league has an unsupported roster slot format.")
+    if not isinstance(rosters, list) or any(
+        not isinstance(row, dict) for row in rosters
+    ):
+        raise RuntimeError("Sleeper did not return league rosters.")
+    owned = []
+    for row in rosters:
+        co_owners = row.get("co_owners")
+        if co_owners is None:
+            co_owners = []
+        if not isinstance(co_owners, list) or any(
+            not isinstance(owner, str) for owner in co_owners
+        ):
+            raise RuntimeError("Sleeper returned invalid roster co-owner data.")
+        if row.get("owner_id") == user_id or user_id in co_owners:
+            owned.append(row)
+    if len(owned) != 1:
+        raise ValueError(
+            "The logged-in user must own or co-own exactly one roster in the league."
+        )
+    roster = owned[0]
+    roster_id = roster.get("roster_id")
+    if type(roster_id) is not int or roster_id < 1:
+        raise RuntimeError("Sleeper returned an invalid roster ID.")
+    _player_ids(roster.get("players"), "roster players")
+    reserve = _player_ids(
+        [] if roster.get("reserve") is None else roster["reserve"], "reserve players"
+    )
+    taxi = _player_ids(
+        [] if roster.get("taxi") is None else roster["taxi"], "taxi players"
+    )
+    return {
+        "league": league,
+        "roster": roster,
+        "roster_id": roster_id,
+        "reserve": reserve,
+        "taxi": taxi,
+        "season": season,
+        "week": week,
+    }
+
+
+async def _team_starters(
+    client: httpx.AsyncClient,
+    league_id: str,
+    league: dict,
+    roster: dict,
+    roster_id: int,
+    week: int,
+) -> list[str] | None:
+    """Read the week's ordered starters, or None when no lineup exists for it yet.
+
+    Mirrors the swap snapshot's source choice: weekly matchups normally, and
+    the retained roster only for a pre-draft dynasty without weekly matchups.
+    """
+    matchups = await _get(client, f"league/{league_id}/matchups/{week}")
+    if matchups == []:
+        if (
+            league.get("status") == "pre_draft"
+            and isinstance(league.get("settings"), dict)
+            and league["settings"].get("type") == 2
+        ):
+            return _lineup([roster], roster_id, "roster")
+        return None
+    return _lineup(matchups, roster_id, "matchup")
+
+
 async def _starters(
     client: httpx.AsyncClient,
     league_id: str,

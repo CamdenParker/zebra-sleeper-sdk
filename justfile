@@ -15,3 +15,7 @@ swap-burrow-maye:
 # Expect rejection: Dowdle cannot replace Maye at QB (two bench players also reject).
 swap-dowdle-maye:
     uv run python examples/use_sdk.py swap --league-id {{league_id}} --user-id {{user_id}} --player-a-id {{dowdle_id}} --player-b-id {{maye_id}}
+
+# Read-only report of every rostered player's slots and weekly projections.
+team:
+    uv run python examples/use_sdk.py team --league-id {{league_id}} --user-id {{user_id}}

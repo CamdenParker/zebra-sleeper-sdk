@@ -5,7 +5,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from sleeper_sdk import login, swap
+from sleeper_sdk import login, swap, team
 
 
 def main() -> None:
@@ -24,6 +24,13 @@ def main() -> None:
     swap_command.add_argument("--player-a-id", required=True)
     swap_command.add_argument("--player-b-id", required=True)
     swap_command.add_argument("--headless", action="store_true")
+    team_command = commands.add_parser(
+        "team", help="Report rostered players' slots and weekly projections."
+    )
+    team_command.add_argument("--league-id", required=True)
+    team_command.add_argument("--user-id", required=True)
+    team_command.add_argument("--week", type=int)
+    team_command.add_argument("--scoring", choices=("std", "half_ppr", "ppr"))
     args = parser.parse_args()
 
     if args.command == "login":
@@ -37,6 +44,16 @@ def main() -> None:
                 user_id=args.user_id,
                 auth_path=args.auth_path,
                 headless=args.headless,
+            )
+        )
+        print(json.dumps(result, indent=2))
+    elif args.command == "team":
+        result = asyncio.run(
+            team(
+                args.league_id,
+                args.user_id,
+                week=args.week,
+                scoring=args.scoring,
             )
         )
         print(json.dumps(result, indent=2))
