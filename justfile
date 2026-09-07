@@ -8,6 +8,19 @@ dowdle_id := "7021"
 default:
     @just --list
 
+# Clear the SDK's saved session; keep the passkey and other devices signed in.
+logout:
+    #!/usr/bin/env -S uv run python
+    from sleeper_sdk.auth import DEFAULT_AUTH_PATH, _auth_lock
+
+    with _auth_lock(DEFAULT_AUTH_PATH):
+        DEFAULT_AUTH_PATH.unlink(missing_ok=True)
+    print("SDK session cleared. Run just login-unattended to sign back in.")
+
+# Prove headless passkey login from a fresh browser and save the recovered session.
+login-unattended:
+    uv run python examples/use_sdk.py --passkey-path "$HOME/.sleeper-sdk/passkey.json" check-auth --user-id {{user_id}} --fresh
+
 # Exchange Burrow and Maye; running twice restores their original positions.
 swap-burrow-maye:
     uv run python examples/use_sdk.py swap --league-id {{league_id}} --user-id {{user_id}} --player-a-id {{burrow_id}} --player-b-id {{maye_id}}
