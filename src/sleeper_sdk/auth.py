@@ -9,7 +9,7 @@ import stat
 import warnings
 from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterator
+from typing import Any, AsyncIterator, Iterator, cast
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
@@ -19,6 +19,7 @@ from playwright.async_api import (
     BrowserContext,
     Page,
     Playwright,
+    StorageState,
     async_playwright,
 )
 from playwright.async_api import (
@@ -97,7 +98,7 @@ def _check_auth_file(info: os.stat_result) -> None:
         )
 
 
-def _validate_storage_state(state: Any) -> dict[str, Any]:
+def _validate_storage_state(state: Any) -> StorageState:
     """Check the browser-state shape without examining or displaying credentials."""
     valid = (
         isinstance(state, dict)
@@ -138,10 +139,10 @@ def _validate_storage_state(state: Any) -> dict[str, Any]:
                 break
     if not valid:
         raise RuntimeError("Saved authentication is malformed. " + _LOGIN_AGAIN)
-    return state
+    return cast(StorageState, state)
 
 
-def _load_storage_state(auth_path: Path = DEFAULT_AUTH_PATH) -> dict[str, Any]:
+def _load_storage_state(auth_path: Path = DEFAULT_AUTH_PATH) -> StorageState:
     with _auth_directory(auth_path) as (path, directory_fd):
         try:
             fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
