@@ -3,9 +3,11 @@
 import argparse
 import asyncio
 import json
+import sys
 from pathlib import Path
 
-from sleeper_sdk import login, swap, team
+from sleeper_sdk import check_auth, enroll_passkey, login, swap, team
+from sleeper_sdk.auth import DEFAULT_PASSKEY_PATH
 
 
 def main() -> None:
@@ -17,7 +19,26 @@ def main() -> None:
         help="Private browser authentication snapshot path.",
     )
     commands = parser.add_subparsers(dest="command")
+    parser.add_argument(
+        "--passkey-path",
+        type=Path,
+        help="Private software passkey file; explicitly enables unattended recovery.",
+    )
     commands.add_parser("login", help="Open a browser and sign in normally.")
+    enroll_command = commands.add_parser(
+        "enroll-passkey", help="Register a dedicated passkey with your assistance."
+    )
+    enroll_command.add_argument("--user-id", required=True)
+    check_command = commands.add_parser(
+        "check-auth", help="Verify authentication without changing a lineup."
+    )
+    check_command.add_argument("--user-id", required=True)
+    check_command.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Prove passkey login without saved session state.",
+    )
+    check_command.add_argument("--visible", action="store_true")
     swap_command = commands.add_parser("swap", help="Exchange two lineup slots.")
     swap_command.add_argument("--league-id", required=True)
     swap_command.add_argument("--user-id", required=True)
@@ -35,6 +56,33 @@ def main() -> None:
 
     if args.command == "login":
         asyncio.run(login(auth_path=args.auth_path))
+    elif args.command == "enroll-passkey":
+        print(
+            "Opening Sleeper Account Settings. Click ADD PASSKEY and complete any "
+            "verification yourself. Wait for the separate headless login proof; "
+            "do not close the browser. Enrollment waits up to ten minutes.",
+            file=sys.stderr,
+            flush=True,
+        )
+        asyncio.run(
+            enroll_passkey(
+                user_id=args.user_id,
+                auth_path=args.auth_path,
+                passkey_path=args.passkey_path or DEFAULT_PASSKEY_PATH,
+            )
+        )
+        print(json.dumps({"user_id": args.user_id, "enrolled": True}))
+    elif args.command == "check-auth":
+        result = asyncio.run(
+            check_auth(
+                user_id=args.user_id,
+                auth_path=args.auth_path,
+                passkey_path=args.passkey_path,
+                fresh=args.fresh,
+                headless=not args.visible,
+            )
+        )
+        print(json.dumps(result))
     elif args.command == "swap":
         result = asyncio.run(
             swap(
@@ -43,6 +91,7 @@ def main() -> None:
                 args.player_b_id,
                 user_id=args.user_id,
                 auth_path=args.auth_path,
+                passkey_path=args.passkey_path,
                 headless=args.headless,
             )
         )
@@ -62,4 +111,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (RuntimeError, ValueError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+    except KeyboardInterrupt:
+        print("Cancelled.", file=sys.stderr)
+        raise SystemExit(130) from None

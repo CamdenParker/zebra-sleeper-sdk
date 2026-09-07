@@ -1,7 +1,7 @@
 # sleeper-sdk
 
-A small async Python library with three public functions: `login`, `swap`, and
-`team`. It reads Sleeper's public API, reports your roster's eligible slots and
+A small async Python library with `login`, `enroll_passkey`, `check_auth`, `swap`,
+and `team`. It reads Sleeper's public API, reports your roster's eligible slots and
 weekly projections, and uses your authenticated browser session to exchange
 two players' exact lineup slots. Python 3.11 or newer is required;
 development is pinned to Python 3.13.7. The only runtime dependencies are
@@ -47,7 +47,83 @@ The directory must be private (`0700`) and the snapshot is stored with mode
 uses POSIX filesystem features and has been exercised on macOS.
 
 Treat the snapshot like a password and keep it out of version control. Sessions
-can expire; run `login` again with the same path when sign-in is required.
+can expire; run `login` again with the same path when sign-in is required, or
+explicitly configure passkey recovery as described below.
+
+## Enroll an unattended passkey
+
+The SDK can use a dedicated software passkey to establish a new Sleeper session.
+It uses Playwright 1.62 or newer's virtual authenticator. The human must initiate
+registration in Sleeper; generating a local key alone does not register it.
+
+1. Run `login` and finish normal sign-in and verification yourself.
+2. Run enrollment for that account:
+
+   ```sh
+   uv run python examples/use_sdk.py enroll-passkey --user-id YOUR_USER_ID
+   ```
+
+3. In the dedicated browser at **Settings → Account**, click **ADD PASSKEY**.
+   Complete any account verification yourself. The software authenticator handles
+   the new credential; do not create an unrelated passkey in your usual browser.
+4. Leave the browser open. The helper waits up to ten minutes, confirms that
+   Sleeper lists the new credential, closes the browser completely, then proves
+   login to the same account in a fresh headless browser with no saved session.
+   Only successful proof permits saving the credential and reporting success.
+
+The default credential file is `~/.sleeper-sdk/passkey.json`. It is separate from
+`auth.json`, carries the account ID, and uses the same private-directory and
+atomic-write protections. It is **not encrypted by the SDK** and grants account
+login access, not just permission to modify lineups. Keep both files outside Git
+and exclude them from logs, traces, and shared artifacts.
+
+Enrollment refuses to overwrite an existing passkey file. To replace a passkey,
+enroll to a new `--passkey-path`, verify it, update callers to use that path, then
+remove the old credential yourself in Sleeper's account settings. If enrollment
+fails after Sleeper added a credential but before a file was saved, remove that
+unsuccessful credential there before retrying. Keep your personal login methods.
+
+Python callers can use
+`await enroll_passkey(user_id=..., auth_path=..., passkey_path=...)`.
+Both paths have the defaults above; CLI path options go **before** the subcommand.
+
+## Check authentication and enable recovery
+
+```sh
+# Verify and refresh the current session; no lineup page is opened.
+uv run python examples/use_sdk.py check-auth --user-id YOUR_USER_ID
+
+# Enable one passkey recovery attempt when the session is missing or logged out.
+uv run python examples/use_sdk.py --passkey-path ~/.sleeper-sdk/passkey.json check-auth --user-id YOUR_USER_ID
+
+# Prove a fresh login without loading saved session state into the browser.
+uv run python examples/use_sdk.py --passkey-path ~/.sleeper-sdk/passkey.json check-auth --user-id YOUR_USER_ID --fresh
+```
+
+`check_auth` returns `AuthStatus`, a typed dictionary containing `user_id` and
+`recovered`. The command prints this as JSON and exits zero on success; failures
+produce a credential-free error on stderr and a nonzero exit code. Checks are
+headless by default; use `--visible` to show the browser, or `headless=False` in
+Python. `--fresh` requires a passkey and preserves the old session file unless
+authentication and account verification succeed. Malformed or unsafe files are
+errors, even during a fresh check.
+
+Opt in to recovery on a lineup exchange by passing
+`passkey_path=Path.home() / ".sleeper-sdk" / "passkey.json"` to `swap`, or by
+supplying the CLI's `--passkey-path` before `swap`. Existing callers without a
+passkey path retain session-only authentication. A configured missing, malformed,
+or wrong-account passkey is rejected even if a session is currently valid.
+
+Recovery happens before any lineup interaction and makes only one login attempt.
+Network failures or unrecognized page changes are not treated as proof of logout.
+An additional human challenge, revoked credential, or failed identity check stops
+the operation. A swap with an uncertain result is never replayed automatically.
+
+This SDK does not select a host, schedule checks, or send notifications. Before
+relying on unattended operation, securely provision the files on your chosen host
+and run a fresh check under its actual runtime account after a reboot. Sleeper
+can revoke credentials or change its login flow, so access is not guaranteed
+indefinitely.
 
 ## Exchange two lineup slots
 
@@ -64,7 +140,7 @@ result = await swap(
 
 In a script, wrap the awaited call in an async function and run it with
 `asyncio.run`. The first three arguments may also be positional; `user_id`,
-`auth_path`, and `headless` are keyword-only. Use real Sleeper IDs for a roster
+`auth_path`, `passkey_path`, and `headless` are keyword-only. Use real Sleeper IDs for a roster
 you own or co-own. Either player argument order works. At least one player must
 be a starter; eligible starter-to-starter and starter-to-bench exchanges are
 supported. IR, taxi, and two-bench-player moves are rejected.
@@ -150,14 +226,16 @@ and its projections come from an undocumented endpoint that can change without
 notice. Public API requests are read-only; all lineup changes go through
 Sleeper's UI.
 
-Only one `swap` can run at a time in a process. There is no cross-process lock;
-concurrent login, other SDK processes, and manual lineup edits are unsupported.
-The read/check/click sequence is not atomic with other actors.
+Only one `swap` can run at a time in a process. Login, enrollment, checks, and
+swaps also hold a nonblocking cross-process lock associated with `auth_path`.
+Use the same auth path for all operations on an account; different paths and
+manual lineup edits are not coordinated. Leave the private `.lock` file in place
+between runs. The read/check/click sequence is not atomic with other actors.
 
 ## Layout
 
-- `src/sleeper_sdk/__init__.py`: exports only `login`, `swap`, and `team`.
-- `auth.py`: interactive sign-in, private snapshots, and verified sessions.
+- `src/sleeper_sdk/__init__.py`: public helpers and the `AuthStatus` result type.
+- `auth.py`: interactive sign-in, passkey enrollment/recovery, and private storage.
 - `_api.py`: private public-API reads and validation for swaps and team reports.
 - `lineup.py`: one UI exchange and complete ordered verification.
 - `team.py`: read-only roster report of eligible slots and weekly projections.
@@ -198,12 +276,33 @@ The read/check/click sequence is not atomic with other actors.
   `BN`; an explicit week outside 1–18 was rejected with a clear error.
   `ruff format` and pyright passed.
 
+Authentication changes were checked separately:
+
+- The new headless `check-auth` command verified the configured account using
+  its existing session and returned `recovered: false`.
+- A simultaneous check was rejected while enrollment held the cross-process
+  session lock. Missing/malformed snapshots, unsafe permissions, missing or
+  malformed configured keys, wrong-account key records, and conflicting paths
+  failed before browser interaction. A fresh check without a key was rejected.
+- The human registered a dedicated software passkey through **ADD PASSKEY**.
+  Enrollment verified the account in a separate headless browser with no saved
+  session, then saved both private files with mode `0600`.
+- A separate `check-auth --fresh` process loaded the saved passkey and returned
+  `recovered: true`. The next normal check reused its session and returned
+  `recovered: false`.
+- Using private temporary session files, both a missing snapshot and an empty
+  logged-out snapshot recovered successfully with `recovered: true`.
+- No lineup was changed for these checks. Reboot validation on the eventual
+  unattended host and long-duration operation remain unverified.
+
 ## References
 
 - [Sleeper API](https://docs.sleeper.com/): read-only league, roster, matchup,
   user, and NFL-state endpoints.
 - [Playwright authentication](https://playwright.dev/python/docs/auth): saving
   and reusing browser state.
+- [Playwright credentials](https://playwright.dev/python/docs/api/class-credentials):
+  software passkey registration and fresh-browser restoration.
 - [Playwright actionability](https://playwright.dev/python/docs/actionability):
   locator readiness checks before interaction.
 - [uv projects](https://docs.astral.sh/uv/guides/projects/): project environments,

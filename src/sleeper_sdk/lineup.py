@@ -304,6 +304,7 @@ async def swap(
     *,
     user_id: str,
     auth_path: Path = DEFAULT_AUTH_PATH,
+    passkey_path: Path | None = None,
     headless: bool = False,
 ) -> dict:
     """Exchange two rostered players once, then verify every ordered starter slot.
@@ -311,6 +312,7 @@ async def swap(
     At least one player must be a starter. Sleeper decides whether the exact
     exchange is legal. Concurrent calls in this process are rejected. A failure
     after the target click may mean the exchange applied; never retry it blindly.
+    Supplying passkey_path enables one unattended login attempt before lineup work.
     """
     for player in (player_a_id, player_b_id):
         if (
@@ -334,7 +336,9 @@ async def swap(
             before = list(snapshot["starters"])
             source = player_a_id if player_a_id in before else player_b_id
             target = player_b_id if source == player_a_id else player_a_id
-            async with _session(auth_path, headless=headless) as (
+            async with _session(
+                auth_path, headless=headless, user_id=user_id, passkey_path=passkey_path
+            ) as (
                 page,
                 authenticated_user_id,
             ):

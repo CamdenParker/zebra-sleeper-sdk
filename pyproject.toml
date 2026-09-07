@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "httpx",
-    "playwright>=1.51",
+    "playwright>=1.62",
 ]
 
 [build-system]
