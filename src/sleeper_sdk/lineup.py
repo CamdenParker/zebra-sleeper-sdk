@@ -282,9 +282,8 @@ async def _verify(
                         snapshot["week"],
                         source=snapshot["source"],
                     )
-                    if last_api == expected:
-                        if await read_reloaded_ui():
-                            return last_api
+                    if last_api == expected and await read_reloaded_ui():
+                        return last_api
                 except Exception as exc:
                     cause = cause or exc
                 # This is bounded API propagation polling, not a browser readiness delay.
@@ -425,8 +424,8 @@ async def swap(
             raise RuntimeError(
                 "The swap may already have applied, but the browser could not verify it. "
                 "Inspect Sleeper before trying again. "
-                f"Last UI starters before submission: {before!r}; "
-                f"last API starters before submission: {before!r}."
+                f"Last UI starters before submission: {before!r}; "  # pyright: ignore[reportPossiblyUnboundVariable]
+                f"last API starters before submission: {before!r}."  # pyright: ignore[reportPossiblyUnboundVariable]
             ) from exc
         raise RuntimeError(
             "Sleeper's authenticated page or roster controls could not be verified before the swap. "
