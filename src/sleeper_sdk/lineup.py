@@ -7,11 +7,11 @@ from threading import Lock
 from urllib.parse import urlparse
 
 import httpx
-from playwright.async_api import Error as PlaywrightError, expect
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import expect
 
 from ._api import _expected_starters, _snapshot, _starters
 from .auth import DEFAULT_AUTH_PATH, _session
-
 
 _SWAP_LOCK = Lock()
 _UI_TIMEOUT_MS = 15_000
@@ -36,12 +36,21 @@ def _snapshot_key(snapshot: dict) -> tuple:
     """Fields that must not change between choosing and submitting an exchange."""
     league, roster = snapshot["league"], snapshot["roster"]
     return (
-        snapshot["roster_id"], snapshot["week"], snapshot["source"],
-        snapshot["starters"], snapshot["slots"],
-        league.get("league_id"), league.get("season"), league.get("season_type"),
-        league.get("sport"), league.get("status"), league.get("settings"),
-        roster.get("owner_id"), sorted(roster.get("co_owners") or []),
-        sorted(roster["players"]), sorted(roster.get("reserve") or []),
+        snapshot["roster_id"],
+        snapshot["week"],
+        snapshot["source"],
+        snapshot["starters"],
+        snapshot["slots"],
+        league.get("league_id"),
+        league.get("season"),
+        league.get("season_type"),
+        league.get("sport"),
+        league.get("status"),
+        league.get("settings"),
+        roster.get("owner_id"),
+        sorted(roster.get("co_owners") or []),
+        sorted(roster["players"]),
+        sorted(roster.get("reserve") or []),
         sorted(roster.get("taxi") or []),
     )
 
@@ -53,18 +62,26 @@ async def _account_name(page) -> str:
     await username.wait_for(state="attached", timeout=_UI_TIMEOUT_MS)
     name = (await username.text_content(timeout=_UI_TIMEOUT_MS) or "").strip()
     if await account.count() != 1 or await username.count() != 1 or not name:
-        raise RuntimeError("Sleeper's signed-in account cannot be identified in the page.")
+        raise RuntimeError(
+            "Sleeper's signed-in account cannot be identified in the page."
+        )
     return name
 
 
 async def _read_ui(page, league_id: str, account_name: str) -> dict:
     location = urlparse(page.url)
-    if location.scheme != "https" or location.netloc != "sleeper.com" or (
-        location.path.rstrip("/") != f"/leagues/{league_id}/team"
+    if (
+        location.scheme != "https"
+        or location.netloc != "sleeper.com"
+        or (location.path.rstrip("/") != f"/leagues/{league_id}/team")
     ):
-        raise RuntimeError("The browser is no longer on the requested league's Team page.")
+        raise RuntimeError(
+            "The browser is no longer on the requested league's Team page."
+        )
     if await _account_name(page) != account_name:
-        raise RuntimeError("Sleeper's signed-in account changed; no further exchange is allowed.")
+        raise RuntimeError(
+            "Sleeper's signed-in account changed; no further exchange is allowed."
+        )
     roster = page.locator(_ROSTER)
     await roster.wait_for(state="visible", timeout=_UI_TIMEOUT_MS)
     if await roster.count() != 1:
@@ -92,14 +109,23 @@ async def _read_ui(page, league_id: str, account_name: str) -> dict:
                 empty: metadata.length === 1 && metadata[0].textContent.trim() === 'Empty'
             };
         })""",
-        {"position": _POSITION, "slot": _SLOT, "avatar": _AVATAR, "metadata": _PLAYER_META},
+        {
+            "position": _POSITION,
+            "slot": _SLOT,
+            "avatar": _AVATAR,
+            "metadata": _PLAYER_META,
+        },
     )
     if not rows:
         raise RuntimeError("Sleeper did not render any roster rows.")
     for row in rows:
         if row["controls"] != 1 or row["badges"] != 1:
             raise RuntimeError("Sleeper's roster row controls are ambiguous.")
-        slot_classes = [value for value in row["slotClasses"] if value != "league-slot-position-square"]
+        slot_classes = [
+            value
+            for value in row["slotClasses"]
+            if value != "league-slot-position-square"
+        ]
         if len(slot_classes) != 1:
             raise RuntimeError("Sleeper's roster slot cannot be identified.")
         row["slot"] = slot_classes[0].upper()
@@ -108,35 +134,55 @@ async def _read_ui(page, league_id: str, account_name: str) -> dict:
         elif len(row["avatars"]) == 1 and isinstance(row["avatars"][0], str):
             player = re.fullmatch(r"nfl Player (\S+)", row["avatars"][0])
             if player is None or row["empty"]:
-                raise RuntimeError("Sleeper's player ID cannot be identified in a roster row.")
+                raise RuntimeError(
+                    "Sleeper's player ID cannot be identified in a roster row."
+                )
             row["player_id"] = player[1]
         else:
-            raise RuntimeError("Sleeper displayed an ambiguous player image in a roster row.")
+            raise RuntimeError(
+                "Sleeper displayed an ambiguous player image in a roster row."
+            )
     return {"week": int(match[1]), "rows": rows}
 
 
 def _ui_starters(ui: dict) -> list[str]:
-    return [row["player_id"] for row in ui["rows"] if row["slot"] not in {"BN", "IR", "TX"}]
+    return [
+        row["player_id"] for row in ui["rows"] if row["slot"] not in {"BN", "IR", "TX"}
+    ]
 
 
-def _assert_ui(ui: dict, snapshot: dict, starters: list[str], *, selected: str | None = None) -> None:
+def _assert_ui(
+    ui: dict, snapshot: dict, starters: list[str], *, selected: str | None = None
+) -> None:
     rows, roster = ui["rows"], snapshot["roster"]
     count = len(snapshot["slots"])
     if ui["week"] != snapshot["week"]:
-        raise RuntimeError("The displayed week differs from Sleeper's current lineup week.")
+        raise RuntimeError(
+            "The displayed week differs from Sleeper's current lineup week."
+        )
     if (
         [row["slot"] for row in rows[:count]] != snapshot["slots"]
         or any(row["slot"] not in {"BN", "IR", "TX"} for row in rows[count:])
         or _ui_starters(ui) != starters
     ):
-        raise RuntimeError("The full ordered starter lineup in Sleeper does not match the API.")
+        raise RuntimeError(
+            "The full ordered starter lineup in Sleeper does not match the API."
+        )
     occupied = [row["player_id"] for row in rows if row["player_id"] != "0"]
     if len(occupied) != len(set(occupied)) or set(occupied) != set(roster["players"]):
-        raise RuntimeError("Sleeper's displayed roster does not match the authenticated user's roster.")
+        raise RuntimeError(
+            "Sleeper's displayed roster does not match the authenticated user's roster."
+        )
     for slot, key in (("IR", "reserve"), ("TX", "taxi")):
-        actual = {row["player_id"] for row in rows if row["slot"] == slot and row["player_id"] != "0"}
+        actual = {
+            row["player_id"]
+            for row in rows
+            if row["slot"] == slot and row["player_id"] != "0"
+        }
         if actual != set(roster.get(key) or []):
-            raise RuntimeError("Sleeper's displayed IR or taxi squad differs from the API.")
+            raise RuntimeError(
+                "Sleeper's displayed IR or taxi squad differs from the API."
+            )
     selected_ids = [row["player_id"] for row in rows if "selected" in row["classes"]]
     if selected_ids != ([] if selected is None else [selected]):
         raise RuntimeError("Sleeper's selected exchange row changed or is ambiguous.")
@@ -149,7 +195,13 @@ def _ui_player(ui: dict, player_id: str) -> dict:
     return rows[0]
 
 
-def _row_locator(page, player_id: str, *, unselected: bool = False, selected_source: str | None = None):
+def _row_locator(
+    page,
+    player_id: str,
+    *,
+    unselected: bool = False,
+    selected_source: str | None = None,
+):
     roster = page.locator(_ROSTER)
     if unselected:
         roster = roster.filter(has_not=page.locator(f"{_ROWS}.selected"))
@@ -158,7 +210,11 @@ def _row_locator(page, player_id: str, *, unselected: bool = False, selected_sou
             has=page.get_by_label(f"nfl Player {selected_source}", exact=True),
         )
         roster = roster.filter(has=source)
-    rows = _ROWS if selected_source is None else f"{_ROWS}.valid:not(.invalid):not(.selected)"
+    rows = (
+        _ROWS
+        if selected_source is None
+        else f"{_ROWS}.valid:not(.invalid):not(.selected)"
+    )
     return roster.locator(rows).filter(
         has=page.get_by_label(f"nfl Player {player_id}", exact=True)
     )
@@ -168,14 +224,25 @@ def _assert_eligible(ui: dict, source: str, target: str) -> None:
     for player in (source, target):
         row = _ui_player(ui, player)
         if (
-            "valid" not in row["classes"] or "invalid" in row["classes"]
+            "valid" not in row["classes"]
+            or "invalid" in row["classes"]
             or not isinstance(row["label"], str)
             or not row["label"].startswith(f"Slot {row['slot']} - ")
         ):
-            raise ValueError("Sleeper does not allow this direct exchange; a player may be locked or ineligible.")
+            raise ValueError(
+                "Sleeper does not allow this direct exchange; a player may be locked or ineligible."
+            )
 
 
-async def _verify(page, client, league_id: str, account_name: str, snapshot: dict, expected: list[str], click_error) -> list[str]:
+async def _verify(
+    page,
+    client,
+    league_id: str,
+    account_name: str,
+    snapshot: dict,
+    expected: list[str],
+    click_error,
+) -> list[str]:
     """Read after the sole submit attempt, including when that click timed out."""
     last_ui = last_api = None
     cause = click_error
@@ -197,8 +264,11 @@ async def _verify(page, client, league_id: str, account_name: str, snapshot: dic
             try:
                 # Sleeper clears selection after the save response. Let that finish
                 # before a reload can interrupt an in-flight request.
-                await expect(page.locator(_ROSTER).locator(f"{_ROWS}.selected")).to_have_count(
-                    0, timeout=_UI_TIMEOUT_MS,
+                await expect(
+                    page.locator(_ROSTER).locator(f"{_ROWS}.selected")
+                ).to_have_count(
+                    0,
+                    timeout=_UI_TIMEOUT_MS,
                 )
             except Exception as exc:
                 cause = cause or exc
@@ -206,7 +276,10 @@ async def _verify(page, client, league_id: str, account_name: str, snapshot: dic
             while True:
                 try:
                     last_api = await _starters(
-                        client, league_id, snapshot["roster_id"], snapshot["week"],
+                        client,
+                        league_id,
+                        snapshot["roster_id"],
+                        snapshot["week"],
                         source=snapshot["source"],
                     )
                     if last_api == expected:
@@ -241,8 +314,15 @@ async def swap(
     after the target click may mean the exchange applied; never retry it blindly.
     """
     for player in (player_a_id, player_b_id):
-        if not isinstance(player, str) or not player or player == "0" or player != player.strip():
-            raise ValueError("Player IDs must be nonempty strings, not names or empty-slot IDs.")
+        if (
+            not isinstance(player, str)
+            or not player
+            or player == "0"
+            or player != player.strip()
+        ):
+            raise ValueError(
+                "Player IDs must be nonempty strings, not names or empty-slot IDs."
+            )
     if player_a_id == player_b_id:
         raise ValueError("Choose two different players to swap.")
     if not _SWAP_LOCK.acquire(blocking=False):
@@ -255,38 +335,62 @@ async def swap(
             before = list(snapshot["starters"])
             source = player_a_id if player_a_id in before else player_b_id
             target = player_b_id if source == player_a_id else player_a_id
-            async with _session(auth_path, headless=headless) as (page, authenticated_user_id):
+            async with _session(auth_path, headless=headless) as (
+                page,
+                authenticated_user_id,
+            ):
                 if authenticated_user_id != user_id:
-                    raise ValueError("The saved Sleeper account does not match user_id. Run login for the intended account.")
-                account_name = (await page.get_by_role(
-                    "textbox", name=_PROFILE_USERNAME, exact=True,
-                ).input_value(timeout=_UI_TIMEOUT_MS)).strip()
+                    raise ValueError(
+                        "The saved Sleeper account does not match user_id. Run login for the intended account."
+                    )
+                account_name = (
+                    await page.get_by_role(
+                        "textbox",
+                        name=_PROFILE_USERNAME,
+                        exact=True,
+                    ).input_value(timeout=_UI_TIMEOUT_MS)
+                ).strip()
                 if not account_name:
-                    raise RuntimeError("Sleeper's own profile did not expose the authenticated username.")
+                    raise RuntimeError(
+                        "Sleeper's own profile did not expose the authenticated username."
+                    )
                 await page.goto(
                     f"https://sleeper.com/leagues/{league_id}/team",
-                    wait_until="domcontentloaded", timeout=_UI_TIMEOUT_MS,
+                    wait_until="domcontentloaded",
+                    timeout=_UI_TIMEOUT_MS,
                 )
                 ui = await _read_ui(page, league_id, account_name)
                 _assert_ui(ui, snapshot, before)
                 source_data = _ui_player(ui, source)
-                if not isinstance(source_data["label"], str) or not source_data["label"].startswith(
-                    f"Slot {source_data['slot']} - "
-                ):
-                    raise ValueError("Sleeper has locked or disabled the requested starter's position.")
+                if not isinstance(source_data["label"], str) or not source_data[
+                    "label"
+                ].startswith(f"Slot {source_data['slot']} - "):
+                    raise ValueError(
+                        "Sleeper has locked or disabled the requested starter's position."
+                    )
                 source_row = _row_locator(page, source)
                 if await source_row.count() != 1:
-                    raise RuntimeError("The requested starter's position control is ambiguous.")
+                    raise RuntimeError(
+                        "The requested starter's position control is ambiguous."
+                    )
                 # Selecting the source only highlights exchange options; it does not submit.
-                await _row_locator(page, source, unselected=True).locator(_POSITION).click(timeout=_UI_TIMEOUT_MS)
-                await expect(source_row).to_have_class(re.compile(r"\bselected\b"), timeout=_UI_TIMEOUT_MS)
+                await (
+                    _row_locator(page, source, unselected=True)
+                    .locator(_POSITION)
+                    .click(timeout=_UI_TIMEOUT_MS)
+                )
+                await expect(source_row).to_have_class(
+                    re.compile(r"\bselected\b"), timeout=_UI_TIMEOUT_MS
+                )
                 ui = await _read_ui(page, league_id, account_name)
                 _assert_ui(ui, snapshot, before, selected=source)
                 _assert_eligible(ui, source, target)
 
                 fresh = await _snapshot(client, league_id, user_id)
                 if _snapshot_key(fresh) != _snapshot_key(snapshot):
-                    raise RuntimeError("The league, week, roster, or lineup changed before the exchange; refresh Sleeper.")
+                    raise RuntimeError(
+                        "The league, week, roster, or lineup changed before the exchange; refresh Sleeper."
+                    )
                 # Re-read the full UI and eligibility immediately before the sole submit.
                 ui = await _read_ui(page, league_id, account_name)
                 _assert_ui(ui, fresh, before, selected=source)
@@ -300,10 +404,20 @@ async def swap(
                     await target_row.locator(_POSITION).click(timeout=_UI_TIMEOUT_MS)
                 except Exception as exc:
                     click_error = exc
-                after = await _verify(page, client, league_id, account_name, snapshot, expected, click_error)
+                after = await _verify(
+                    page,
+                    client,
+                    league_id,
+                    account_name,
+                    snapshot,
+                    expected,
+                    click_error,
+                )
                 return {
-                    "league_id": league_id, "roster_id": snapshot["roster_id"],
-                    "week": snapshot["week"], "starters_before": before,
+                    "league_id": league_id,
+                    "roster_id": snapshot["roster_id"],
+                    "week": snapshot["week"],
+                    "starters_before": before,
                     "starters_after": after,
                 }
     except (PlaywrightError, AssertionError) as exc:
