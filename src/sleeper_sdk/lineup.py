@@ -303,7 +303,7 @@ async def swap(
     player_b_id: str,
     *,
     user_id: str,
-    auth_path: str | Path = DEFAULT_AUTH_PATH,
+    auth_path: Path = DEFAULT_AUTH_PATH,
     headless: bool = False,
 ) -> dict:
     """Exchange two rostered players once, then verify every ordered starter slot.

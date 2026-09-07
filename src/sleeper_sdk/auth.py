@@ -141,7 +141,7 @@ def _validate_storage_state(state: Any) -> dict[str, Any]:
     return state
 
 
-def _load_storage_state(auth_path: str | Path = DEFAULT_AUTH_PATH) -> dict[str, Any]:
+def _load_storage_state(auth_path: Path = DEFAULT_AUTH_PATH) -> dict[str, Any]:
     with _auth_directory(auth_path) as (path, directory_fd):
         try:
             fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
@@ -161,7 +161,7 @@ def _load_storage_state(auth_path: str | Path = DEFAULT_AUTH_PATH) -> dict[str, 
 
 
 async def _save_storage_state(
-    context: BrowserContext, auth_path: str | Path = DEFAULT_AUTH_PATH
+    context: BrowserContext, auth_path: Path = DEFAULT_AUTH_PATH
 ) -> None:
     state = await context.storage_state(indexed_db=True)
     with _auth_directory(auth_path, create=True) as (path, directory_fd):
@@ -270,7 +270,7 @@ async def _launch_browser(playwright: Playwright, *, headless: bool) -> Browser:
         ) from None
 
 
-async def login(*, auth_path: str | Path = DEFAULT_AUTH_PATH) -> None:
+async def login(*, auth_path: Path = DEFAULT_AUTH_PATH) -> None:
     """Sign in normally in visible Chromium and verify saved login in a fresh browser.
 
     Complete Sleeper's login and any verification prompts yourself. The function
@@ -321,7 +321,7 @@ async def login(*, auth_path: str | Path = DEFAULT_AUTH_PATH) -> None:
 
 @asynccontextmanager
 async def _session(
-    auth_path: str | Path = DEFAULT_AUTH_PATH, *, headless: bool = True
+    auth_path: Path = DEFAULT_AUTH_PATH, *, headless: bool = True
 ) -> AsyncIterator[tuple[Page, str]]:
     """Yield a verified session; refreshing storage must never change an operation's outcome."""
     state = _load_storage_state(auth_path)
