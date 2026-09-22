@@ -288,22 +288,27 @@ async def _snapshot(client: httpx.AsyncClient, league_id: str, user_id: str) -> 
     ):
         raise ValueError("The league must belong to the current NFL season.")
 
-    # display_week is the week shown in Sleeper's UI, and can advance before week.
+    # display_week is the week shown in Sleeper's UI, and can advance before
+    # week. After Monday night football ends the order reverses: week moves to
+    # the next week at once, display_week catches up only at Wednesday's reset,
+    # and the lineup being edited is next week's, already carried over.
     week, nfl_week = state.get("display_week"), state.get("week")
     if type(week) is not int or not 1 <= week <= 18:
         raise RuntimeError("Sleeper has no supported current lineup week.")
     season_type = state.get("season_type")
+    carried = False
     if season_type == "pre":
         if week != 1:
             raise ValueError(
                 "Only the week 1 lineup is supported before the NFL season."
             )
     elif (
-        season_type != "regular"
-        or type(nfl_week) is not int
-        or not 1 <= nfl_week <= 18
-        or week not in (nfl_week, nfl_week + 1)
+        season_type != "regular" or type(nfl_week) is not int or not 1 <= nfl_week <= 18
     ):
+        raise ValueError("The current editable NFL week cannot be determined safely.")
+    elif week == nfl_week - 1:
+        week, carried = nfl_week, True
+    elif week not in (nfl_week, nfl_week + 1):
         raise ValueError("The current editable NFL week cannot be determined safely.")
 
     positions = league.get("roster_positions")
@@ -345,17 +350,25 @@ async def _snapshot(client: httpx.AsyncClient, league_id: str, user_id: str) -> 
     taxi = _player_ids(
         [] if roster.get("taxi") is None else roster["taxi"], "taxi players"
     )
-    matchups = await _get(client, f"league/{league_id}/matchups/{week}")
-    source = "matchup"
-    # Sleeper's web UI uses the retained roster before a dynasty rookie draft.
-    # Select this source explicitly, only while no weekly matchups exist at all.
-    if (
-        matchups == []
-        and league.get("status") == "pre_draft"
-        and settings.get("type") == 2
-    ):
+    if carried:
+        # Next week's matchup rows can exist without their starters being
+        # populated yet; the roster's live lineup is the carried-over one.
         source = "roster"
-    starters = _lineup(rosters if source == "roster" else matchups, roster_id, source)
+        starters = _lineup(rosters, roster_id, source)
+    else:
+        matchups = await _get(client, f"league/{league_id}/matchups/{week}")
+        source = "matchup"
+        # Sleeper's web UI uses the retained roster before a dynasty rookie draft.
+        # Select this source explicitly, only while no weekly matchups exist at all.
+        if (
+            matchups == []
+            and league.get("status") == "pre_draft"
+            and settings.get("type") == 2
+        ):
+            source = "roster"
+        starters = _lineup(
+            rosters if source == "roster" else matchups, roster_id, source
+        )
     active = set(starters) - {"0"}
     if len(starters) != len(slots) or not active <= set(players):
         raise RuntimeError(
