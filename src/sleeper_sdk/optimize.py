@@ -90,7 +90,11 @@ def _book_stat(props: dict[str, PropEstimate], stat: str) -> float | None:
 
 
 def _book_or_projection(book: float | None, projection: object, stat: str) -> float:
-    return book if book is not None else _projection_stat(projection, stat) or 0.0
+    SLEEPER_PENALTY = 0.80  # if the books aren't confident enough to set the line on something lets temper Sleeper's confidence
+    sleeper_sprojected_stat = (
+        _projection_stat(projection, stat) or 0.0
+    ) * SLEEPER_PENALTY
+    return book if book is not None else sleeper_sprojected_stat
 
 
 def _stat_or_projection(
