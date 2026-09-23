@@ -2,7 +2,7 @@
 
 import asyncio
 import re
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
@@ -53,6 +53,7 @@ def _snapshot_key(snapshot: dict) -> tuple:
         league.get("sport"),
         league.get("status"),
         league.get("settings"),
+        league.get("scoring_settings"),
         roster.get("owner_id"),
         sorted(roster.get("co_owners") or []),
         sorted(roster["players"]),
@@ -346,6 +347,7 @@ async def _exchange_once(
     expected: list[str],
     player_a_id: str,
     player_b_id: str,
+    before_submit: Callable[[], Awaitable[None]] | None = None,
 ) -> list[str]:
     """Run one verified exchange inside an open team session.
 
@@ -396,6 +398,8 @@ async def _exchange_once(
         target_row = _row_locator(page, target, selected_source=source)
         if await target_row.count() != 1:
             raise RuntimeError("The requested exchange target is ambiguous.")
+        if before_submit is not None:
+            await before_submit()
         click_error = None
         submit_attempted = True
         try:
@@ -545,6 +549,7 @@ async def _apply_swaps(
     passkey_path: Path | None,
     headless: bool,
     baseline: dict | None = None,
+    before_exchange: Callable[[], Awaitable[None]] | None = None,
 ) -> dict:
     """Apply shape-checked pairs in order within one session.
 
@@ -552,7 +557,8 @@ async def _apply_swaps(
     opens, so a pair that would become illegal partway through is rejected
     with nothing applied. A `baseline` snapshot, when given, must still match
     the current one; this keeps a caller's plan from running against a lineup
-    it was not computed for.
+    it was not computed for. An optional callback checks external conditions
+    before each exchange and again immediately before its submit click.
     """
     if not _SWAP_LOCK.acquire(blocking=False):
         raise RuntimeError("Another swap is already running in this process.")
@@ -576,6 +582,8 @@ async def _apply_swaps(
                 ) as (page, account_name):
                     for (player_a_id, player_b_id), expected in zip(pairs, lineups):
                         try:
+                            if before_exchange is not None:
+                                await before_exchange()
                             current = await _exchange_once(
                                 page,
                                 client,
@@ -587,6 +595,7 @@ async def _apply_swaps(
                                 expected,
                                 player_a_id,
                                 player_b_id,
+                                before_exchange,
                             )
                         except Exception as exc:
                             if len(pairs) == 1:

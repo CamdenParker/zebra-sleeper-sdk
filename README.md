@@ -3,8 +3,9 @@
 A small async Python library with `login`, `enroll_passkey`, `check_auth`,
 `swap`, `swaps`, `team`, `optimal_lineup`, and `set_optimal_lineup`. It reads
 Sleeper's public API, reports your roster's eligible slots and weekly
-projections, computes the highest-projected legal lineup, and uses your
-authenticated browser session to exchange players' exact lineup slots. Python
+projections, ranks legal lineups using SportsGameOdds player props and Sleeper
+projections, and uses your authenticated browser session to exchange players'
+exact lineup slots. Python
 3.11 or newer is required; development is pinned to Python 3.13.7. The only
 runtime dependencies are `httpx` and `playwright`.
 
@@ -239,6 +240,20 @@ The call reads only Sleeper's public API; no browser opens and no lineup
 changes. Weekly projections come from an undocumented Sleeper endpoint that
 can change without notice.
 
+## Read player props
+
+```python
+from sleeper_sdk.props import player_props
+
+props = await player_props("Joe Burrow", season="2026", week=3, team="CIN")
+```
+
+The result maps available full-game stat names, such as `passing_yards`, to
+`value`, `kind`, and `source`. A `line` is a bookmaker over/under threshold;
+`probability` is the implied chance of at least one touchdown from yes odds.
+No matching pregame market returns an empty dictionary. This uses the same
+weekly slate cache as lineup optimization.
+
 ## Optimize your lineup
 
 ```python
@@ -250,10 +265,13 @@ lineup = await optimal_lineup(
 )
 ```
 
-`optimal_lineup` is read-only like `team`: it reports the highest-projected
-legal lineup for one week. The arguments match `team`'s (`league_id` and
-`user_id` may be positional; `week` and `scoring` are optional keywords), but
-`week` defaults to Sleeper's current editable lineup week, the same week
+`optimal_lineup` is read-only like `team`: it reports the highest-ranked
+legal lineup for one week. Set `SPORTSGAMEODDS_API_KEY` in the environment or
+in a `.env` file in the working directory before calling either lineup
+optimizer. The
+arguments match `team`'s (`league_id` and `user_id` may be positional; `week`
+and `scoring` are optional keywords), but `week` defaults to Sleeper's current
+editable lineup week, the same week
 `set_optimal_lineup` applies, rather than the displayed week. The result
 holds `league_id`, `user_id`, `week`, `scoring`,
 `total_projected_points`, and one `lineup` entry per active slot in league
@@ -265,19 +283,34 @@ order:
     "player_id": "11632",
     "full_name": "Malik Nabers",
     "positions": ["WR"],
+    "prop_score": 14.7,
     "projected_points": 11.2,
 }
 ```
 
-Positions and flex slots are chosen together so that no legal lineup
-projects more total points; players without a projection, for example on
-bye, start only when a slot would otherwise be empty, and slots no rostered
-player can legally fill hold `None` values. IR and taxi players are never
-selected. The call reads only Sleeper's public API.
+`prop_score` approximates fantasy points from available bookmaker over/under
+lines and touchdown odds, with Sleeper stat projections filling missing
+markets. League scoring weights are used when available; reception scoring
+defaults to the league setting, includes position reception bonuses, and can
+be selected with `scoring`. Players
+rank first by `prop_score` (missing scores last), then by Sleeper
+`projected_points` (missing projections last). The returned
+`total_projected_points` sums Sleeper projections, so it is not the ranking
+score. Past weeks use Sleeper projections alone; their pregame odds are not
+available on the SportsGameOdds free tier. Positions and flex slots are chosen
+together for a legal lineup; slots
+no rostered player can fill hold `None` values. IR and taxi players are never
+selected. In the active week, starters whose games have begun stay in their
+slots, and other players from started games cannot enter. Selected current
+starters keep their slots where possible. The call reads
+Sleeper and SportsGameOdds; the latter fetches one
+weekly NFL slate and caches it for ten minutes to limit free-tier usage.
+The cache expires at kickoff if a game starts sooner.
 
-`set_optimal_lineup` computes the same optimum and applies it through the
-verified `swaps` helper in one browser session, one bench player and one
-starter at a time:
+`set_optimal_lineup` uses the same ranking while keeping starters whose games
+have begun in their current slots. Players from started games cannot enter
+from the bench. It applies the resulting lineup through the verified `swaps`
+helper in one browser session, one bench player and one starter at a time:
 
 ```python
 result = await set_optimal_lineup(
@@ -294,9 +327,10 @@ optimal slot are left alone, and no browser opens at all when the lineup is
 already optimal. The return value contains `league_id`, `roster_id`,
 `week`, `scoring`, the ordered `swaps` applied as `player_in` and
 `player_out`, `starters_before`, `starters_after`, and
-`total_projected_points`. Every exchange is verified before the next one
-begins; if one fails, or the verified lineup stops following the plan because
-something else changed it, nothing further is applied and the error reports
+`total_projected_points` (the Sleeper projection sum). Every exchange is
+verified before the next one begins; if one fails, or the verified lineup
+stops following the plan because something else changed it, nothing further
+is applied and the error reports
 the progress. Inspect Sleeper before retrying, just as for `swap`. A lineup with
 an empty starting slot cannot be optimized this way, because a
 player-to-player swap cannot fill an empty slot; fill it in Sleeper first.

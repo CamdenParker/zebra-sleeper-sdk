@@ -75,7 +75,7 @@ def main() -> None:
     team_command.add_argument("--week", type=int)
     team_command.add_argument("--scoring", choices=("std", "half_ppr", "ppr"))
     optimal_command = commands.add_parser(
-        "optimal-lineup", help="Print the highest-projected legal lineup for one week."
+        "optimal-lineup", help="Print the highest-ranked legal lineup for one week."
     )
     optimal_command.add_argument("--league-id", required=True)
     optimal_command.add_argument("--user-id", required=True)
