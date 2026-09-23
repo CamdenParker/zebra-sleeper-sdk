@@ -10,9 +10,10 @@ import os
 import re
 import stat
 import warnings
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator, Iterator, TypedDict, cast
+from typing import Any, TypedDict, cast
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
@@ -701,7 +702,7 @@ async def _refresh_after_success(
         if _load_storage_state(auth_path) != baseline:
             raise RuntimeError("Saved authentication changed during the operation.")
         await _save_storage_state(context, auth_path)
-    except Exception:
+    except Exception:  # noqa: BLE001
         with suppress(Exception):
             warnings.warn(
                 "The operation finished, but saved authentication could not be refreshed. "

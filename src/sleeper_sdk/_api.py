@@ -5,7 +5,6 @@ import time
 
 import httpx
 
-
 _BASE_URL = "https://api.sleeper.app/v1"
 _TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 _SLOTS = {
@@ -196,7 +195,7 @@ async def _team_snapshot(
     if not isinstance(league, dict) or league.get("league_id") != league_id:
         raise RuntimeError("Sleeper did not return the requested league.")
     if not isinstance(state, dict):
-        raise RuntimeError("Sleeper did not return the current NFL state.")
+        raise RuntimeError("Sleeper did not return the current NFL state.")  # noqa: TRY004
     if league.get("sport") != "nfl" or league.get("season_type") != "regular":
         raise ValueError("Only NFL regular-season leagues are supported.")
     settings = league.get("settings")
@@ -325,7 +324,7 @@ async def _snapshot(client: httpx.AsyncClient, league_id: str, user_id: str) -> 
     if not isinstance(league, dict) or league.get("league_id") != league_id:
         raise RuntimeError("Sleeper did not return the requested league.")
     if not isinstance(state, dict):
-        raise RuntimeError("Sleeper did not return the current NFL state.")
+        raise RuntimeError("Sleeper did not return the current NFL state.")  # noqa: TRY004
     if league.get("sport") != "nfl" or league.get("season_type") != "regular":
         raise ValueError("Only NFL regular-season leagues are supported.")
     settings = league.get("settings")

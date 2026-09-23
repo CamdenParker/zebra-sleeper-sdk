@@ -54,7 +54,9 @@ def _candidates(
             continue
         record = players.get(player_id)
         if not isinstance(record, dict):
-            raise RuntimeError(f"Sleeper has no player record for {player_id}.")
+            raise RuntimeError(  # noqa: TRY004
+                f"Sleeper has no player record for {player_id}."
+            )
         rows.append(
             {
                 "player_id": player_id,

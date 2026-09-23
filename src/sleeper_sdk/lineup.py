@@ -293,7 +293,7 @@ async def _verify(
             last_ui = _ui_starters(ui)
             _assert_ui(ui, snapshot, expected)
             return True
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             cause = cause or exc
             return False
 
@@ -308,7 +308,7 @@ async def _verify(
                     0,
                     timeout=_UI_TIMEOUT_MS,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 cause = cause or exc
             await read_reloaded_ui()
             while True:
@@ -322,7 +322,7 @@ async def _verify(
                     )
                     if last_api == expected and await read_reloaded_ui():
                         return last_api
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     cause = cause or exc
                 # This is bounded API propagation polling, not a browser readiness delay.
                 await asyncio.sleep(_API_POLL_INTERVAL)
@@ -400,7 +400,7 @@ async def _exchange_once(
         submit_attempted = True
         try:
             await target_row.locator(_POSITION).click(timeout=_UI_TIMEOUT_MS)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             click_error = exc
         return await _verify(
             page,

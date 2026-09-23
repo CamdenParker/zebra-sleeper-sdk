@@ -124,7 +124,9 @@ async def team(
         for player_id in roster["players"]:
             record = players.get(player_id)
             if not isinstance(record, dict):
-                raise RuntimeError(f"Sleeper has no player record for {player_id}.")
+                raise RuntimeError(  # noqa: TRY004
+                    f"Sleeper has no player record for {player_id}."
+                )
             positions = _fantasy_positions(record, player_id)
             points = _projected_points(
                 projections.get(player_id), player_id, points_field
