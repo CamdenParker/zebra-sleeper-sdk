@@ -17,7 +17,7 @@ from ._api import (
     _team_snapshot,
 )
 from .auth import DEFAULT_AUTH_PATH
-from .lineup import swap
+from .lineup import _apply_swaps
 from .team import _FLEX_ELIGIBLE, _POINTS_FIELDS, _full_name, _points_field
 
 _SCORING = {field: variant for variant, field in _POINTS_FIELDS.items()}
@@ -289,17 +289,20 @@ async def set_optimal_lineup(
     """Compute the optimal lineup for the current editable week and apply it.
 
     The optimal lineup is computed exactly as `optimal_lineup` does, then the
-    current lineup is transformed into it through the same verified
-    `swap` helper, one bench player and one starter at a time. Starters who
-    already occupy their optimal slot are left alone; when the lineup is
-    already optimal no browser opens. The return value contains `league_id`,
-    `roster_id`, `week`, `scoring`, the ordered `swaps` applied as `player_in`
-    and `player_out`, `starters_before`, `starters_after`, and the lineup's
-    `total_projected_points`. Each swap is verified before the next begins;
-    if one fails, nothing further is applied and the error reports the
-    progress. A lineup with an empty starting slot cannot be optimized this
-    way, because a player-to-player swap cannot fill an empty slot. Supplying
-    `passkey_path` enables one unattended login attempt before lineup work.
+    current lineup is transformed into it through the verified `swaps` helper:
+    one browser session, one bench player and one starter at a time, each
+    exchange verified before the next begins. Starters who already occupy
+    their optimal slot are left alone; when the lineup is already optimal no
+    browser opens. The return value contains `league_id`, `roster_id`, `week`,
+    `scoring`, the ordered `swaps` applied as `player_in` and `player_out`,
+    `starters_before`, `starters_after`, and the lineup's
+    `total_projected_points`. If the lineup changes between planning and the
+    first exchange, nothing is applied; if an exchange fails or something else
+    changes the lineup mid-way, nothing further is applied and the error
+    reports how many exchanges completed. A lineup with an empty
+    starting slot cannot be optimized this way, because a player-to-player
+    swap cannot fill an empty slot. Supplying `passkey_path` enables one
+    unattended login attempt before lineup work.
     """
     async with httpx.AsyncClient() as client:
         snapshot = await _snapshot(client, league_id, user_id)
@@ -336,35 +339,21 @@ async def set_optimal_lineup(
             "starters_after": list(before),
             "total_projected_points": _total(target),
         }
-        expected = list(before)
-        for entering, leaving in plan:
-            # The lineup each exchange must produce, so drift caused by another
-            # actor is caught before the next exchange builds on it.
-            expected = [
-                entering if player == leaving else player for player in expected
-            ]
-            try:
-                verified = await swap(
-                    league_id,
-                    entering,
-                    leaving,
-                    user_id=user_id,
-                    auth_path=auth_path,
-                    passkey_path=passkey_path,
-                    headless=headless,
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    f"The optimal lineup is not fully applied ({len(result['swaps'])} "
-                    f"of {len(plan)} exchanges completed); inspect Sleeper before "
-                    f"trying again. {exc}"
-                ) from exc
-            result["swaps"].append({"player_in": entering, "player_out": leaving})
-            result["starters_after"] = verified["starters_after"]
-            if verified["starters_after"] != expected:
-                raise RuntimeError(
-                    f"An exchange verified, but the lineup no longer follows the plan "
-                    f"({len(result['swaps'])} of {len(plan)} exchanges completed); "
-                    f"nothing further was applied. Inspect Sleeper before trying again."
-                )
+        if not plan:
+            return result
+        # The planning snapshot is the baseline, so a lineup changed since the
+        # plan was computed is rejected before any browser opens.
+        batch = await _apply_swaps(
+            league_id,
+            plan,
+            user_id=user_id,
+            auth_path=auth_path,
+            passkey_path=passkey_path,
+            headless=headless,
+            baseline=snapshot,
+        )
+        result["swaps"] = [
+            {"player_in": entering, "player_out": leaving} for entering, leaving in plan
+        ]
+        result["starters_after"] = batch["starters_after"]
         return result

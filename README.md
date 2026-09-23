@@ -1,12 +1,12 @@
 # sleeper-sdk
 
 A small async Python library with `login`, `enroll_passkey`, `check_auth`,
-`swap`, `team`, `optimal_lineup`, and `set_optimal_lineup`. It reads Sleeper's
-public API, reports your roster's eligible slots and weekly projections,
-computes the highest-projected legal lineup, and uses your authenticated
-browser session to exchange two players' exact lineup slots. Python 3.11 or
-newer is required; development is pinned to Python 3.13.7. The only runtime
-dependencies are `httpx` and `playwright`.
+`swap`, `swaps`, `team`, `optimal_lineup`, and `set_optimal_lineup`. It reads
+Sleeper's public API, reports your roster's eligible slots and weekly
+projections, computes the highest-projected legal lineup, and uses your
+authenticated browser session to exchange players' exact lineup slots. Python
+3.11 or newer is required; development is pinned to Python 3.13.7. The only
+runtime dependencies are `httpx` and `playwright`.
 
 ## Setup
 
@@ -110,10 +110,11 @@ authentication and account verification succeed. Malformed or unsafe files are
 errors, even during a fresh check.
 
 Opt in to recovery on a lineup exchange by passing
-`passkey_path=Path.home() / ".sleeper-sdk" / "passkey.json"` to `swap`, or by
-supplying the CLI's `--passkey-path` before `swap`. Existing callers without a
-passkey path retain session-only authentication. A configured missing, malformed,
-or wrong-account passkey is rejected even if a session is currently valid.
+`passkey_path=Path.home() / ".sleeper-sdk" / "passkey.json"` to `swap` or
+`swaps`, or by supplying the CLI's `--passkey-path` before `swap`, `swaps`, or
+`set-optimal-lineup`. Existing callers without a passkey path retain
+session-only authentication. A configured missing, malformed, or wrong-account
+passkey is rejected even if a session is currently valid.
 
 Recovery happens before any lineup interaction and makes only one login attempt.
 Network failures or unrecognized page changes are not treated as proof of logout.
@@ -163,6 +164,26 @@ A failed verification may occur after Sleeper has saved a change. Inspect your
 lineup before taking further action. The SDK does not automatically retry a
 mutation or roll it back.
 
+To apply several exchanges without reopening the browser between them, use
+`swaps` with the pairs in order. The whole chain is validated against your
+roster before any browser opens. Each pair then goes through the same
+per-exchange checks and verification as `swap`, and the first failure stops
+the batch with a report of how many exchanges completed:
+
+```python
+from sleeper_sdk import swaps
+
+result = await swaps(
+    league_id="YOUR_LEAGUE_ID",
+    exchanges=[("FIRST_PLAYER_ID", "SECOND_PLAYER_ID"), ("THIRD_ID", "FOURTH_ID")],
+    user_id="YOUR_USER_ID",
+)
+```
+
+The return value adds the applied `swaps` as `player_a_id`/`player_b_id` pairs,
+in order, to `swap`'s fields. An empty exchange list opens no browser and
+reports the current lineup.
+
 The example opens no browser and changes no lineup when imported or run without
 a subcommand; the no-argument invocation only prints help:
 
@@ -170,6 +191,7 @@ a subcommand; the no-argument invocation only prints help:
 uv run python examples/use_sdk.py
 uv run python examples/use_sdk.py login
 uv run python examples/use_sdk.py swap --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID --player-a-id FIRST_PLAYER_ID --player-b-id SECOND_PLAYER_ID
+uv run python examples/use_sdk.py swaps --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID --exchange FIRST_PLAYER_ID:SECOND_PLAYER_ID --exchange THIRD_ID:FOURTH_ID
 uv run python examples/use_sdk.py team --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID [--week 1] [--scoring half_ppr]
 ```
 
@@ -254,7 +276,8 @@ player can legally fill hold `None` values. IR and taxi players are never
 selected. The call reads only Sleeper's public API.
 
 `set_optimal_lineup` computes the same optimum and applies it through the
-verified `swap` helper, one bench player and one starter at a time:
+verified `swaps` helper in one browser session, one bench player and one
+starter at a time:
 
 ```python
 result = await set_optimal_lineup(
@@ -291,14 +314,14 @@ just set-optimal-lineup
 
 The browser controls target Sleeper's current desktop Classic NFL Team page,
 for the current season and supported editable week. Best Ball and other sports
-are unsupported. UI changes can require selector updates. There are no batch
-operations or scheduler; `set_optimal_lineup` applies one verified exchange at
-a time. `team` and `optimal_lineup` are the read-only helpers, and their
-projections come from an undocumented endpoint that can change without
-notice. Public API requests are read-only; all lineup changes go through
-Sleeper's UI.
+are unsupported. UI changes can require selector updates. There is no
+scheduler; `swaps` and `set_optimal_lineup` apply one verified exchange at a
+time within a single browser session. `team` and `optimal_lineup` are the
+read-only helpers, and their projections come from an undocumented endpoint
+that can change without notice. Public API requests are read-only; all lineup
+changes go through Sleeper's UI.
 
-Only one `swap` can run at a time in a process. Login, enrollment, checks, and
+Only one `swap` or `swaps` batch can run at a time in a process. Login, enrollment, checks, and
 swaps also hold a nonblocking cross-process lock associated with `auth_path`.
 Use the same auth path for all operations on an account; different paths and
 manual lineup edits are not coordinated. Leave the private `.lock` file in place
@@ -309,7 +332,7 @@ between runs. The read/check/click sequence is not atomic with other actors.
 - `src/sleeper_sdk/__init__.py`: public helpers and the `AuthStatus` result type.
 - `auth.py`: interactive sign-in, passkey enrollment/recovery, and private storage.
 - `_api.py`: private public-API reads and validation for swaps and team reports.
-- `lineup.py`: one UI exchange and complete ordered verification.
+- `lineup.py`: verified UI exchanges, one at a time or batched in one session.
 - `team.py`: read-only roster report of eligible slots and weekly projections.
 - `optimize.py`: optimal-lineup selection, swap planning, and application.
 - `examples/use_sdk.py`: explicit opt-in script commands.

@@ -13,6 +13,7 @@ from sleeper_sdk import (
     optimal_lineup,
     set_optimal_lineup,
     swap,
+    swaps,
     team,
 )
 from sleeper_sdk.auth import DEFAULT_PASSKEY_PATH
@@ -53,6 +54,19 @@ def main() -> None:
     swap_command.add_argument("--player-a-id", required=True)
     swap_command.add_argument("--player-b-id", required=True)
     swap_command.add_argument("--headless", action="store_true")
+    batch_command = commands.add_parser(
+        "swaps", help="Exchange several pairs in one browser session."
+    )
+    batch_command.add_argument("--league-id", required=True)
+    batch_command.add_argument("--user-id", required=True)
+    batch_command.add_argument(
+        "--exchange",
+        action="append",
+        required=True,
+        metavar="A:B",
+        help="One player pair to exchange; repeat for each pair, in order.",
+    )
+    batch_command.add_argument("--headless", action="store_true")
     team_command = commands.add_parser(
         "team", help="Report rostered players' slots and weekly projections."
     )
@@ -112,6 +126,28 @@ def main() -> None:
                 args.league_id,
                 args.player_a_id,
                 args.player_b_id,
+                user_id=args.user_id,
+                auth_path=args.auth_path,
+                passkey_path=args.passkey_path,
+                headless=args.headless,
+            )
+        )
+        print(json.dumps(result, indent=2))
+    elif args.command == "swaps":
+        pairs = []
+        for exchange in args.exchange:
+            sides = [side.strip() for side in exchange.split(":")]
+            if len(sides) != 2 or not all(sides):
+                print(
+                    f"Error: each --exchange must be two player IDs as A:B, got {exchange!r}.",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            pairs.append((sides[0], sides[1]))
+        result = asyncio.run(
+            swaps(
+                args.league_id,
+                pairs,
                 user_id=args.user_id,
                 auth_path=args.auth_path,
                 passkey_path=args.passkey_path,

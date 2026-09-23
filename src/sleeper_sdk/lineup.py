@@ -1,14 +1,16 @@
-"""One direct, verified exchange through Sleeper's roster UI."""
+"""Verified lineup exchanges through Sleeper's roster UI, one session per batch."""
 
 import asyncio
 import re
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
 from urllib.parse import urlparse
 
 import httpx
 from playwright.async_api import Error as PlaywrightError
-from playwright.async_api import expect
+from playwright.async_api import Page, expect
 
 from ._api import _expected_starters, _snapshot, _starters
 from .auth import DEFAULT_AUTH_PATH, _session
@@ -30,6 +32,10 @@ _WEEK = ".week-selector-dropdown .label .text"
 _ACCOUNT = ".nav-profile-item"
 _ACCOUNT_NAME = ".name"
 _PROFILE_USERNAME = "Username"
+_PRE_CLICK_FAILURE = (
+    "Sleeper's authenticated page or roster controls could not be verified before the swap. "
+    "No target click was attempted. Refresh Sleeper and confirm that the roster is editable."
+)
 
 
 def _snapshot_key(snapshot: dict) -> tuple:
@@ -234,6 +240,38 @@ def _assert_eligible(ui: dict, source: str, target: str) -> None:
             )
 
 
+def _validate_pair(player_a_id: str, player_b_id: str) -> None:
+    """Check the ID shapes of one exchange before any browser opens."""
+    for player in (player_a_id, player_b_id):
+        if (
+            not isinstance(player, str)
+            or not player
+            or player == "0"
+            or player != player.strip()
+        ):
+            raise ValueError(
+                "Player IDs must be nonempty strings, not names or empty-slot IDs."
+            )
+    if player_a_id == player_b_id:
+        raise ValueError("Choose two different players to swap.")
+
+
+async def _read_account_name(page) -> str:
+    """Resolve the signed-in username from Sleeper's own profile field."""
+    account_name = (
+        await page.get_by_role(
+            "textbox",
+            name=_PROFILE_USERNAME,
+            exact=True,
+        ).input_value(timeout=_UI_TIMEOUT_MS)
+    ).strip()
+    if not account_name:
+        raise RuntimeError(
+            "Sleeper's own profile did not expose the authenticated username."
+        )
+    return account_name
+
+
 async def _verify(
     page,
     client,
@@ -297,6 +335,117 @@ async def _verify(
     ) from cause
 
 
+async def _exchange_once(
+    page,
+    client: httpx.AsyncClient,
+    league_id: str,
+    user_id: str,
+    account_name: str,
+    snapshot: dict,
+    current: list[str],
+    expected: list[str],
+    player_a_id: str,
+    player_b_id: str,
+) -> list[str]:
+    """Run one verified exchange inside an open team session.
+
+    `current` is the lineup the previous exchange left behind and `expected`
+    the lineup this one must produce. `current` is checked against a fresh API
+    read immediately before the submit click, so drift caused by another actor
+    aborts before anything is clicked. Returns the verified starters.
+    """
+    view = {**snapshot, "starters": current}
+    source = player_a_id if player_a_id in current else player_b_id
+    target = player_b_id if source == player_a_id else player_a_id
+    submit_attempted = False
+    try:
+        ui = await _read_ui(page, league_id, account_name)
+        _assert_ui(ui, snapshot, current)
+        source_data = _ui_player(ui, source)
+        if not isinstance(source_data["label"], str) or not source_data[
+            "label"
+        ].startswith(f"Slot {source_data['slot']} - "):
+            raise ValueError(
+                "Sleeper has locked or disabled the requested starter's position."
+            )
+        source_row = _row_locator(page, source)
+        if await source_row.count() != 1:
+            raise RuntimeError("The requested starter's position control is ambiguous.")
+        # Selecting the source only highlights exchange options; it does not submit.
+        await (
+            _row_locator(page, source, unselected=True)
+            .locator(_POSITION)
+            .click(timeout=_UI_TIMEOUT_MS)
+        )
+        await expect(source_row).to_have_class(
+            re.compile(r"\bselected\b"), timeout=_UI_TIMEOUT_MS
+        )
+        ui = await _read_ui(page, league_id, account_name)
+        _assert_ui(ui, snapshot, current, selected=source)
+        _assert_eligible(ui, source, target)
+
+        fresh = await _snapshot(client, league_id, user_id)
+        if _snapshot_key(fresh) != _snapshot_key(view):
+            raise RuntimeError(
+                "The league, week, roster, or lineup changed before the exchange; refresh Sleeper."
+            )
+        # Re-read the full UI and eligibility immediately before the sole submit.
+        ui = await _read_ui(page, league_id, account_name)
+        _assert_ui(ui, fresh, current, selected=source)
+        _assert_eligible(ui, source, target)
+        target_row = _row_locator(page, target, selected_source=source)
+        if await target_row.count() != 1:
+            raise RuntimeError("The requested exchange target is ambiguous.")
+        click_error = None
+        submit_attempted = True
+        try:
+            await target_row.locator(_POSITION).click(timeout=_UI_TIMEOUT_MS)
+        except Exception as exc:
+            click_error = exc
+        return await _verify(
+            page,
+            client,
+            league_id,
+            account_name,
+            snapshot,
+            expected,
+            click_error,
+        )
+    except (PlaywrightError, AssertionError) as exc:
+        if submit_attempted:
+            raise RuntimeError(
+                "The swap may already have applied, but the browser could not verify it. "
+                "Inspect Sleeper before trying again. "
+                f"Verified starters before submission: {current!r}."
+            ) from exc
+        raise RuntimeError(_PRE_CLICK_FAILURE) from exc
+
+
+@asynccontextmanager
+async def _open_team(
+    league_id: str,
+    user_id: str,
+    auth_path: Path,
+    passkey_path: Path | None,
+    headless: bool,
+) -> AsyncIterator[tuple[Page, str]]:
+    """Enter the session, verify the account, and land on the league's Team page."""
+    async with _session(
+        auth_path, headless=headless, user_id=user_id, passkey_path=passkey_path
+    ) as (page, authenticated_user_id):
+        if authenticated_user_id != user_id:
+            raise ValueError(
+                "The saved Sleeper account does not match user_id. Run login for the intended account."
+            )
+        account_name = await _read_account_name(page)
+        await page.goto(
+            f"https://sleeper.com/leagues/{league_id}/team",
+            wait_until="domcontentloaded",
+            timeout=_UI_TIMEOUT_MS,
+        )
+        yield page, account_name
+
+
 async def swap(
     league_id: str,
     player_a_id: str,
@@ -313,127 +462,152 @@ async def swap(
     exchange is legal. Concurrent calls in this process are rejected. A failure
     after the target click may mean the exchange applied; never retry it blindly.
     Supplying passkey_path enables one unattended login attempt before lineup work.
+    For several exchanges in one browser session, use `swaps`.
     """
-    for player in (player_a_id, player_b_id):
-        if (
-            not isinstance(player, str)
-            or not player
-            or player == "0"
-            or player != player.strip()
-        ):
+    _validate_pair(player_a_id, player_b_id)
+    result = await _apply_swaps(
+        league_id,
+        [(player_a_id, player_b_id)],
+        user_id=user_id,
+        auth_path=auth_path,
+        passkey_path=passkey_path,
+        headless=headless,
+    )
+    del result["swaps"]
+    return result
+
+
+async def swaps(
+    league_id: str,
+    exchanges: Sequence[tuple[str, str]],
+    *,
+    user_id: str,
+    auth_path: Path = DEFAULT_AUTH_PATH,
+    passkey_path: Path | None = None,
+    headless: bool = False,
+) -> dict:
+    """Exchange several player pairs in one browser session, verifying each one.
+
+    Every pair is applied in order through the same checks as `swap`: the full
+    ordered lineup is asserted in the UI before the submit click, the click is
+    checked against a fresh API read, and the complete lineup is verified in
+    both the reloaded UI and the API before the next exchange begins. The
+    returned dictionary contains `league_id`, `roster_id`, `week`,
+    `starters_before`, `starters_after`, and the applied `swaps` as
+    `player_a_id`/`player_b_id` pairs in order. The whole chain is checked
+    against the current roster before any browser opens, so a pair that would
+    be illegal after the earlier ones is rejected with nothing applied. An
+    empty exchange list opens no browser and reports the current lineup. If an
+    exchange fails, nothing
+    further is applied and the error reports how many exchanges completed;
+    inspect Sleeper before trying again, since a failure after a submit click
+    may mean that exchange applied. Concurrent calls in this process are
+    rejected. Supplying passkey_path enables one unattended login attempt
+    before lineup work.
+    """
+    pairs: list[tuple[str, str]] = []
+    for exchange in exchanges:
+        if not isinstance(exchange, (tuple, list)) or len(exchange) != 2:
             raise ValueError(
-                "Player IDs must be nonempty strings, not names or empty-slot IDs."
+                "Each exchange must be a pair of player IDs, for example ('A', 'B')."
             )
-    if player_a_id == player_b_id:
-        raise ValueError("Choose two different players to swap.")
+        player_a_id, player_b_id = exchange
+        _validate_pair(player_a_id, player_b_id)
+        pairs.append((player_a_id, player_b_id))
+    return await _apply_swaps(
+        league_id,
+        pairs,
+        user_id=user_id,
+        auth_path=auth_path,
+        passkey_path=passkey_path,
+        headless=headless,
+    )
+
+
+def _plan_lineups(snapshot: dict, pairs: list[tuple[str, str]]) -> list[list[str]]:
+    """The lineup each exchange must produce, validated before any browser opens."""
+    lineups: list[list[str]] = []
+    current = snapshot["starters"]
+    for player_a_id, player_b_id in pairs:
+        current = _expected_starters(
+            {**snapshot, "starters": current}, player_a_id, player_b_id
+        )
+        lineups.append(current)
+    return lineups
+
+
+async def _apply_swaps(
+    league_id: str,
+    pairs: list[tuple[str, str]],
+    *,
+    user_id: str,
+    auth_path: Path,
+    passkey_path: Path | None,
+    headless: bool,
+    baseline: dict | None = None,
+) -> dict:
+    """Apply shape-checked pairs in order within one session.
+
+    The whole chain is validated against the current lineup before a browser
+    opens, so a pair that would become illegal partway through is rejected
+    with nothing applied. A `baseline` snapshot, when given, must still match
+    the current one; this keeps a caller's plan from running against a lineup
+    it was not computed for.
+    """
     if not _SWAP_LOCK.acquire(blocking=False):
         raise RuntimeError("Another swap is already running in this process.")
-    submit_attempted = False
     try:
         async with httpx.AsyncClient() as client:
             snapshot = await _snapshot(client, league_id, user_id)
-            expected = _expected_starters(snapshot, player_a_id, player_b_id)
-            before = list(snapshot["starters"])
-            source = player_a_id if player_a_id in before else player_b_id
-            target = player_b_id if source == player_a_id else player_a_id
-            async with _session(
-                auth_path, headless=headless, user_id=user_id, passkey_path=passkey_path
-            ) as (
-                page,
-                authenticated_user_id,
+            if baseline is not None and _snapshot_key(snapshot) != _snapshot_key(
+                baseline
             ):
-                if authenticated_user_id != user_id:
-                    raise ValueError(
-                        "The saved Sleeper account does not match user_id. Run login for the intended account."
-                    )
-                account_name = (
-                    await page.get_by_role(
-                        "textbox",
-                        name=_PROFILE_USERNAME,
-                        exact=True,
-                    ).input_value(timeout=_UI_TIMEOUT_MS)
-                ).strip()
-                if not account_name:
-                    raise RuntimeError(
-                        "Sleeper's own profile did not expose the authenticated username."
-                    )
-                await page.goto(
-                    f"https://sleeper.com/leagues/{league_id}/team",
-                    wait_until="domcontentloaded",
-                    timeout=_UI_TIMEOUT_MS,
+                raise RuntimeError(
+                    "The league, week, roster, or lineup changed after the exchanges "
+                    "were planned; nothing was applied."
                 )
-                ui = await _read_ui(page, league_id, account_name)
-                _assert_ui(ui, snapshot, before)
-                source_data = _ui_player(ui, source)
-                if not isinstance(source_data["label"], str) or not source_data[
-                    "label"
-                ].startswith(f"Slot {source_data['slot']} - "):
-                    raise ValueError(
-                        "Sleeper has locked or disabled the requested starter's position."
-                    )
-                source_row = _row_locator(page, source)
-                if await source_row.count() != 1:
-                    raise RuntimeError(
-                        "The requested starter's position control is ambiguous."
-                    )
-                # Selecting the source only highlights exchange options; it does not submit.
-                await (
-                    _row_locator(page, source, unselected=True)
-                    .locator(_POSITION)
-                    .click(timeout=_UI_TIMEOUT_MS)
-                )
-                await expect(source_row).to_have_class(
-                    re.compile(r"\bselected\b"), timeout=_UI_TIMEOUT_MS
-                )
-                ui = await _read_ui(page, league_id, account_name)
-                _assert_ui(ui, snapshot, before, selected=source)
-                _assert_eligible(ui, source, target)
-
-                fresh = await _snapshot(client, league_id, user_id)
-                if _snapshot_key(fresh) != _snapshot_key(snapshot):
-                    raise RuntimeError(
-                        "The league, week, roster, or lineup changed before the exchange; refresh Sleeper."
-                    )
-                # Re-read the full UI and eligibility immediately before the sole submit.
-                ui = await _read_ui(page, league_id, account_name)
-                _assert_ui(ui, fresh, before, selected=source)
-                _assert_eligible(ui, source, target)
-                target_row = _row_locator(page, target, selected_source=source)
-                if await target_row.count() != 1:
-                    raise RuntimeError("The requested exchange target is ambiguous.")
-                click_error = None
-                submit_attempted = True
-                try:
-                    await target_row.locator(_POSITION).click(timeout=_UI_TIMEOUT_MS)
-                except Exception as exc:
-                    click_error = exc
-                after = await _verify(
-                    page,
-                    client,
-                    league_id,
-                    account_name,
-                    snapshot,
-                    expected,
-                    click_error,
-                )
-                return {
-                    "league_id": league_id,
-                    "roster_id": snapshot["roster_id"],
-                    "week": snapshot["week"],
-                    "starters_before": before,
-                    "starters_after": after,
-                }
+            before = list(snapshot["starters"])
+            lineups = _plan_lineups(snapshot, pairs)
+            current = before
+            completed: list[dict] = []
+            if pairs:
+                async with _open_team(
+                    league_id, user_id, auth_path, passkey_path, headless
+                ) as (page, account_name):
+                    for (player_a_id, player_b_id), expected in zip(pairs, lineups):
+                        try:
+                            current = await _exchange_once(
+                                page,
+                                client,
+                                league_id,
+                                user_id,
+                                account_name,
+                                snapshot,
+                                current,
+                                expected,
+                                player_a_id,
+                                player_b_id,
+                            )
+                        except Exception as exc:
+                            if len(pairs) == 1:
+                                raise
+                            raise RuntimeError(
+                                f"The batch stopped after {len(completed)} of {len(pairs)} "
+                                f"exchanges; inspect Sleeper before trying again. {exc}"
+                            ) from exc
+                        completed.append(
+                            {"player_a_id": player_a_id, "player_b_id": player_b_id}
+                        )
+            return {
+                "league_id": league_id,
+                "roster_id": snapshot["roster_id"],
+                "week": snapshot["week"],
+                "starters_before": before,
+                "starters_after": list(current),
+                "swaps": completed,
+            }
     except (PlaywrightError, AssertionError) as exc:
-        if submit_attempted:
-            raise RuntimeError(
-                "The swap may already have applied, but the browser could not verify it. "
-                "Inspect Sleeper before trying again. "
-                f"Last UI starters before submission: {before!r}; "  # pyright: ignore[reportPossiblyUnboundVariable]
-                f"last API starters before submission: {before!r}."  # pyright: ignore[reportPossiblyUnboundVariable]
-            ) from exc
-        raise RuntimeError(
-            "Sleeper's authenticated page or roster controls could not be verified before the swap. "
-            "No target click was attempted. Refresh Sleeper and confirm that the roster is editable."
-        ) from exc
+        # Exchanges convert their own browser errors, so these precede any click.
+        raise RuntimeError(_PRE_CLICK_FAILURE) from exc
     finally:
         _SWAP_LOCK.release()
