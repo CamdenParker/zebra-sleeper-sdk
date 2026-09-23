@@ -1,7 +1,7 @@
 # sleeper-sdk
 
 A small async Python library with `login`, `enroll_passkey`, `check_auth`,
-`swap`, `swaps`, `team`, `optimal_lineup`, and `set_optimal_lineup`. It reads
+`swap`, `swaps`, `team`, `team_props`, `optimal_lineup`, and `set_optimal_lineup`. It reads
 Sleeper's public API, reports your roster's eligible slots and weekly
 projections, ranks legal lineups using SportsGameOdds player props and Sleeper
 projections, and uses your authenticated browser session to exchange players'
@@ -249,10 +249,36 @@ props = await player_props("Joe Burrow", season="2026", week=3, team="CIN")
 ```
 
 The result maps available full-game stat names, such as `passing_yards`, to
-`value`, `kind`, and `source`. A `line` is a bookmaker over/under threshold;
+`value`, `kind`, `source`, and `books`. A `line` is a bookmaker over/under threshold;
 `probability` is the implied chance of at least one touchdown from yes odds.
 No matching pregame market returns an empty dictionary. This uses the same
 weekly slate cache as lineup optimization.
+
+Run `just team-props` for every player on the configured roster, or call
+`await team_props(league_id, user_id)` from Python. The default week is the
+current editable week; `--week` and `--scoring` are available with the CLI.
+Set `SPORTSGAMEODDS_API_KEY` in the environment or `.env` first. Each stat has
+separate fields, so a Sleeper fallback never appears as a bookmaker prop:
+
+```json
+"receiving_yards": {
+  "prop": null,
+  "sleeper_projection": 72.4
+}
+```
+
+When available, `prop` contains the estimate and its sportsbook IDs in
+`books`; `sleeper_projection` remains visible alongside it. For `book_median`,
+the listed books supplied the lines in the median. For SportsGameOdds
+`book_over_under`, `fair_odds`, and `book_odds` consensus values, they are
+available books on that market; the API does not identify the exact consensus
+contributors. An empty list means no individual book could be identified.
+`pass_int` and `fum_lost` are Sleeper-only stats. `touchdowns` is an overall
+book market; its scoring fallback uses the separate rushing and receiving
+touchdown projections. The report includes every rostered player, including
+positions without supported player-prop markets. Past weeks show Sleeper
+projections with `prop: null` because historical pregame markets are not
+available on the SportsGameOdds free tier.
 
 ## Optimize your lineup
 
@@ -368,6 +394,7 @@ between runs. The read/check/click sequence is not atomic with other actors.
 - `_api.py`: private public-API reads and validation for swaps and team reports.
 - `lineup.py`: verified UI exchanges, one at a time or batched in one session.
 - `team.py`: read-only roster report of eligible slots and weekly projections.
+- `prop_report.py`: read-only roster props and projection provenance.
 - `optimize.py`: optimal-lineup selection, swap planning, and application.
 - `examples/use_sdk.py`: explicit opt-in script commands.
 

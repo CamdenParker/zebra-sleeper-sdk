@@ -15,6 +15,7 @@ from sleeper_sdk import (
     swap,
     swaps,
     team,
+    team_props,
 )
 from sleeper_sdk.auth import DEFAULT_PASSKEY_PATH
 
@@ -74,6 +75,14 @@ def main() -> None:
     team_command.add_argument("--user-id", required=True)
     team_command.add_argument("--week", type=int)
     team_command.add_argument("--scoring", choices=("std", "half_ppr", "ppr"))
+    props_command = commands.add_parser(
+        "team-props",
+        help="Show each rostered player's props, books, and Sleeper projections.",
+    )
+    props_command.add_argument("--league-id", required=True)
+    props_command.add_argument("--user-id", required=True)
+    props_command.add_argument("--week", type=int)
+    props_command.add_argument("--scoring", choices=("std", "half_ppr", "ppr"))
     optimal_command = commands.add_parser(
         "optimal-lineup", help="Print the highest-ranked legal lineup for one week."
     )
@@ -158,6 +167,16 @@ def main() -> None:
     elif args.command == "team":
         result = asyncio.run(
             team(
+                args.league_id,
+                args.user_id,
+                week=args.week,
+                scoring=args.scoring,
+            )
+        )
+        print(json.dumps(result, indent=2))
+    elif args.command == "team-props":
+        result = asyncio.run(
+            team_props(
                 args.league_id,
                 args.user_id,
                 week=args.week,

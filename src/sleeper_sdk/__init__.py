@@ -3,6 +3,7 @@
 from .auth import AuthStatus, check_auth, enroll_passkey, login
 from .lineup import swap, swaps
 from .optimize import optimal_lineup, set_optimal_lineup
+from .prop_report import team_props
 from .team import team
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "swap",
     "swaps",
     "team",
+    "team_props",
 ]

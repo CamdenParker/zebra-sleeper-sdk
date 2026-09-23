@@ -50,6 +50,7 @@ class PropEstimate(TypedDict):
     value: float
     kind: Literal["line", "probability"]
     source: Literal["book_over_under", "book_median", "fair_odds", "book_odds"]
+    books: list[str]
 
 
 class PlayerMarket(TypedDict):
@@ -115,15 +116,17 @@ def _implied_probability(value: object) -> float | None:
     return 100 / (price + 100) if price > 0 else -price / (100 - price)
 
 
-def _active_books(odd: dict) -> list[dict]:
+def _active_books(odd: dict) -> dict[str, dict]:
     by_bookmaker = odd.get("byBookmaker")
     if not isinstance(by_bookmaker, dict):
-        return []
-    return [
-        book
-        for book in by_bookmaker.values()
-        if isinstance(book, dict) and book.get("available") is True
-    ]
+        return {}
+    return {
+        book_id: book
+        for book_id, book in by_bookmaker.items()
+        if isinstance(book_id, str)
+        and isinstance(book, dict)
+        and book.get("available") is True
+    }
 
 
 def _estimate(odd: dict) -> PropEstimate | None:
@@ -132,21 +135,32 @@ def _estimate(odd: dict) -> PropEstimate | None:
         return None
     bet_type = odd.get("betTypeID")
     if bet_type == "ou" and odd.get("sideID") in ("over", "under"):
-        lines = [
-            value
-            for book in books
+        lines = {
+            book_id: value
+            for book_id, book in books.items()
             if (value := _number(book.get("overUnder"))) is not None
-        ]
+        }
         if lines:
             return {
-                "value": float(median(lines)),
+                "value": float(median(lines.values())),
                 "kind": "line",
                 "source": "book_median",
+                "books": sorted(lines),
             }
         line = _number(odd.get("bookOverUnder"))
         if line is not None:
-            return {"value": line, "kind": "line", "source": "book_over_under"}
+            return {
+                "value": line,
+                "kind": "line",
+                "source": "book_over_under",
+                "books": sorted(books),
+            }
     elif bet_type == "yn" and odd.get("sideID") == "yes":
+        priced_books = sorted(
+            book_id
+            for book_id, book in books.items()
+            if _implied_probability(book.get("odds")) is not None
+        )
         if odd.get("fairOddsAvailable") is True:
             probability = _implied_probability(odd.get("fairOdds"))
             if probability is not None:
@@ -154,10 +168,16 @@ def _estimate(odd: dict) -> PropEstimate | None:
                     "value": probability,
                     "kind": "probability",
                     "source": "fair_odds",
+                    "books": priced_books,
                 }
         probability = _implied_probability(odd.get("bookOdds"))
         if probability is not None:
-            return {"value": probability, "kind": "probability", "source": "book_odds"}
+            return {
+                "value": probability,
+                "kind": "probability",
+                "source": "book_odds",
+                "books": priced_books,
+            }
     return None
 
 
@@ -394,7 +414,10 @@ async def player_props(
     """Return available full-game props for one NFL player in a given week.
 
     Each value says whether it is a bookmaker O/U line or an anytime-TD
-    probability. Empty means no suitable pregame market matched this player.
+    probability and lists the available books for that market. For a median,
+    these are the books whose lines were used. For SportsGameOdds consensus
+    values, the exact contributing set is not exposed. Empty means no
+    suitable pregame market matched this player.
     SportsGameOdds errors raise ``RuntimeError``. The API key is read from
     ``SPORTSGAMEODDS_API_KEY`` or ``.env`` in the working directory (falling
     back to the source project's root for editable installs).

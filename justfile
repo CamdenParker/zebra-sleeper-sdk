@@ -33,6 +33,10 @@ swap-dowdle-maye:
 team:
     uv run python examples/use_sdk.py team --league-id {{league_id}} --user-id {{user_id}}
 
+# Read-only roster props with source books and separate Sleeper projections.
+team-props:
+    uv run python examples/use_sdk.py team-props --league-id {{league_id}} --user-id {{user_id}}
+
 # Print the highest-projected legal lineup for the current editable week.
 optimal-lineup:
     uv run python examples/use_sdk.py optimal-lineup --league-id {{league_id}} --user-id {{user_id}}

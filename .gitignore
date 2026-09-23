@@ -38,3 +38,5 @@ trace*.zip
 .DS_Store
 .idea/
 .vscode/
+
+data
