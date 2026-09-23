@@ -32,3 +32,11 @@ swap-dowdle-maye:
 # Read-only report of every rostered player's slots and weekly projections.
 team:
     uv run python examples/use_sdk.py team --league-id {{league_id}} --user-id {{user_id}}
+
+# Print the highest-projected legal lineup for the current editable week.
+optimal-lineup:
+    uv run python examples/use_sdk.py optimal-lineup --league-id {{league_id}} --user-id {{user_id}}
+
+# Compute the optimal lineup and apply it through verified swaps.
+set-optimal-lineup:
+    uv run python examples/use_sdk.py set-optimal-lineup --league-id {{league_id}} --user-id {{user_id}}

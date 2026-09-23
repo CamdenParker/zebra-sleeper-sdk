@@ -108,6 +108,72 @@ async def _projections(client: httpx.AsyncClient, season: str, week: int) -> dic
     return projections
 
 
+def _lineup_slots(league: dict) -> list[str]:
+    """Active lineup slots in league order, one entry per slot instance."""
+    positions = league.get("roster_positions")
+    if not isinstance(positions, list) or any(
+        not isinstance(position, str) or position not in _SLOTS | {"BN"}
+        for position in positions
+    ):
+        raise ValueError("The league has an unsupported roster slot format.")
+    return [position for position in positions if position != "BN"]
+
+
+def _editable_week(state: dict) -> int:
+    """Resolve Sleeper's current editable lineup week from the NFL state.
+
+    display_week is the week shown in Sleeper's UI, and can advance before the
+    NFL week. After Monday night football ends the order reverses: week moves
+    to the next week at once, display_week catches up only at Wednesday's
+    reset, and the lineup being edited is next week's, already carried over.
+    """
+    week, nfl_week = state.get("display_week"), state.get("week")
+    if type(week) is not int or not 1 <= week <= 18:
+        raise RuntimeError("Sleeper has no supported current lineup week.")
+    season_type = state.get("season_type")
+    if season_type == "pre":
+        if week != 1:
+            raise ValueError(
+                "Only the week 1 lineup is supported before the NFL season."
+            )
+        return week
+    if season_type != "regular" or type(nfl_week) is not int or not 1 <= nfl_week <= 18:
+        raise ValueError("The current editable NFL week cannot be determined safely.")
+    if week == nfl_week - 1:
+        return nfl_week
+    if week not in (nfl_week, nfl_week + 1):
+        raise ValueError("The current editable NFL week cannot be determined safely.")
+    return week
+
+
+def _fantasy_positions(record: dict, player_id: str) -> list[str]:
+    """A player record's eligible fantasy positions, validated."""
+    positions = record.get("fantasy_positions")
+    if positions is None:
+        positions = []
+    if not isinstance(positions, list) or any(
+        not isinstance(position, str) or not position for position in positions
+    ):
+        raise RuntimeError(
+            f"Sleeper returned invalid position data for player {player_id}."
+        )
+    return positions
+
+
+def _projected_points(projection, player_id: str, points_field: str) -> float | None:
+    """One projection record's points for the field, or None without a value."""
+    points = None
+    if isinstance(projection, dict):
+        value = projection.get(points_field)
+        if value is not None:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise RuntimeError(
+                    f"Sleeper returned invalid projected points for player {player_id}."
+                )
+            points = float(value)
+    return points
+
+
 async def _team_snapshot(
     client: httpx.AsyncClient, league_id: str, user_id: str, week: int | None
 ) -> dict:
@@ -157,12 +223,8 @@ async def _team_snapshot(
         week = state.get("display_week")
         if type(week) is not int or not 1 <= week <= 18:
             raise RuntimeError("Sleeper has no supported current lineup week.")
-    positions = league.get("roster_positions")
-    if not isinstance(positions, list) or any(
-        not isinstance(position, str) or position not in _SLOTS | {"BN"}
-        for position in positions
-    ):
-        raise ValueError("The league has an unsupported roster slot format.")
+    if not _lineup_slots(league):
+        raise ValueError("The league has no active lineup slots.")
     if not isinstance(rosters, list) or any(
         not isinstance(row, dict) for row in rosters
     ):
@@ -288,36 +350,11 @@ async def _snapshot(client: httpx.AsyncClient, league_id: str, user_id: str) -> 
     ):
         raise ValueError("The league must belong to the current NFL season.")
 
-    # display_week is the week shown in Sleeper's UI, and can advance before
-    # week. After Monday night football ends the order reverses: week moves to
-    # the next week at once, display_week catches up only at Wednesday's reset,
-    # and the lineup being edited is next week's, already carried over.
-    week, nfl_week = state.get("display_week"), state.get("week")
-    if type(week) is not int or not 1 <= week <= 18:
-        raise RuntimeError("Sleeper has no supported current lineup week.")
-    season_type = state.get("season_type")
-    carried = False
-    if season_type == "pre":
-        if week != 1:
-            raise ValueError(
-                "Only the week 1 lineup is supported before the NFL season."
-            )
-    elif (
-        season_type != "regular" or type(nfl_week) is not int or not 1 <= nfl_week <= 18
-    ):
-        raise ValueError("The current editable NFL week cannot be determined safely.")
-    elif week == nfl_week - 1:
-        week, carried = nfl_week, True
-    elif week not in (nfl_week, nfl_week + 1):
-        raise ValueError("The current editable NFL week cannot be determined safely.")
+    display_week = state.get("display_week")
+    week = _editable_week(state)
+    carried = week != display_week
 
-    positions = league.get("roster_positions")
-    if not isinstance(positions, list) or any(
-        not isinstance(position, str) or position not in _SLOTS | {"BN"}
-        for position in positions
-    ):
-        raise ValueError("The league has an unsupported roster slot format.")
-    slots = [position for position in positions if position != "BN"]
+    slots = _lineup_slots(league)
     if not slots:
         raise ValueError("The league has no active lineup slots.")
     if not isinstance(rosters, list) or any(
@@ -383,6 +420,7 @@ async def _snapshot(client: httpx.AsyncClient, league_id: str, user_id: str) -> 
         "roster": roster,
         "roster_id": roster_id,
         "week": week,
+        "season": season,
         "starters": starters,
         "slots": slots,
         "source": source,

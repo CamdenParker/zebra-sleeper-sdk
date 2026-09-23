@@ -4,7 +4,15 @@ import asyncio
 
 import httpx
 
-from ._api import _players, _projections, _team_snapshot, _team_starters
+from ._api import (
+    _fantasy_positions,
+    _lineup_slots,
+    _players,
+    _projected_points,
+    _projections,
+    _team_snapshot,
+    _team_starters,
+)
 
 _FLEX_ELIGIBLE = {
     "FLEX": {"RB", "WR", "TE"},
@@ -96,17 +104,11 @@ async def team(
             _projections(client, snapshot["season"], snapshot["week"]),
         )
         league, roster = snapshot["league"], snapshot["roster"]
-        slots = list(
-            dict.fromkeys(
-                position for position in league["roster_positions"] if position != "BN"
-            )
-        )
+        slots = list(dict.fromkeys(_lineup_slots(league)))
         points_field = _points_field(league.get("scoring_settings"), scoring)
         current: dict[str, str] = {}
         if starters is not None:
-            lineup_slots = [
-                position for position in league["roster_positions"] if position != "BN"
-            ]
+            lineup_slots = _lineup_slots(league)
             if len(starters) != len(lineup_slots):
                 raise RuntimeError(
                     "The week's lineup does not match the league's lineup slots."
@@ -123,26 +125,10 @@ async def team(
             record = players.get(player_id)
             if not isinstance(record, dict):
                 raise RuntimeError(f"Sleeper has no player record for {player_id}.")
-            positions = record.get("fantasy_positions")
-            if positions is None:
-                positions = []
-            if not isinstance(positions, list) or any(
-                not isinstance(position, str) or not position for position in positions
-            ):
-                raise RuntimeError(
-                    f"Sleeper returned invalid position data for player {player_id}."
-                )
-            projection = projections.get(player_id)
-            points = None
-            if isinstance(projection, dict):
-                value = projection.get(points_field)
-                if value is not None:
-                    if isinstance(value, bool) or not isinstance(value, (int, float)):
-                        raise RuntimeError(
-                            f"Sleeper returned invalid projected points for player "
-                            f"{player_id}."
-                        )
-                    points = float(value)
+            positions = _fantasy_positions(record, player_id)
+            points = _projected_points(
+                projections.get(player_id), player_id, points_field
+            )
             slot = current.get(player_id)
             if slot is None and starters is not None:
                 if player_id in snapshot["reserve"]:

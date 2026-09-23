@@ -6,7 +6,15 @@ import json
 import sys
 from pathlib import Path
 
-from sleeper_sdk import check_auth, enroll_passkey, login, swap, team
+from sleeper_sdk import (
+    check_auth,
+    enroll_passkey,
+    login,
+    optimal_lineup,
+    set_optimal_lineup,
+    swap,
+    team,
+)
 from sleeper_sdk.auth import DEFAULT_PASSKEY_PATH
 
 
@@ -52,6 +60,21 @@ def main() -> None:
     team_command.add_argument("--user-id", required=True)
     team_command.add_argument("--week", type=int)
     team_command.add_argument("--scoring", choices=("std", "half_ppr", "ppr"))
+    optimal_command = commands.add_parser(
+        "optimal-lineup", help="Print the highest-projected legal lineup for one week."
+    )
+    optimal_command.add_argument("--league-id", required=True)
+    optimal_command.add_argument("--user-id", required=True)
+    optimal_command.add_argument("--week", type=int)
+    optimal_command.add_argument("--scoring", choices=("std", "half_ppr", "ppr"))
+    set_optimal_command = commands.add_parser(
+        "set-optimal-lineup",
+        help="Compute the optimal lineup and apply it through verified swaps.",
+    )
+    set_optimal_command.add_argument("--league-id", required=True)
+    set_optimal_command.add_argument("--user-id", required=True)
+    set_optimal_command.add_argument("--scoring", choices=("std", "half_ppr", "ppr"))
+    set_optimal_command.add_argument("--headless", action="store_true")
     args = parser.parse_args()
 
     if args.command == "login":
@@ -103,6 +126,28 @@ def main() -> None:
                 args.user_id,
                 week=args.week,
                 scoring=args.scoring,
+            )
+        )
+        print(json.dumps(result, indent=2))
+    elif args.command == "optimal-lineup":
+        result = asyncio.run(
+            optimal_lineup(
+                args.league_id,
+                args.user_id,
+                week=args.week,
+                scoring=args.scoring,
+            )
+        )
+        print(json.dumps(result, indent=2))
+    elif args.command == "set-optimal-lineup":
+        result = asyncio.run(
+            set_optimal_lineup(
+                args.league_id,
+                user_id=args.user_id,
+                scoring=args.scoring,
+                auth_path=args.auth_path,
+                passkey_path=args.passkey_path,
+                headless=args.headless,
             )
         )
         print(json.dumps(result, indent=2))

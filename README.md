@@ -1,11 +1,12 @@
 # sleeper-sdk
 
-A small async Python library with `login`, `enroll_passkey`, `check_auth`, `swap`,
-and `team`. It reads Sleeper's public API, reports your roster's eligible slots and
-weekly projections, and uses your authenticated browser session to exchange
-two players' exact lineup slots. Python 3.11 or newer is required;
-development is pinned to Python 3.13.7. The only runtime dependencies are
-`httpx` and `playwright`.
+A small async Python library with `login`, `enroll_passkey`, `check_auth`,
+`swap`, `team`, `optimal_lineup`, and `set_optimal_lineup`. It reads Sleeper's
+public API, reports your roster's eligible slots and weekly projections,
+computes the highest-projected legal lineup, and uses your authenticated
+browser session to exchange two players' exact lineup slots. Python 3.11 or
+newer is required; development is pinned to Python 3.13.7. The only runtime
+dependencies are `httpx` and `playwright`.
 
 ## Setup
 
@@ -216,13 +217,84 @@ The call reads only Sleeper's public API; no browser opens and no lineup
 changes. Weekly projections come from an undocumented Sleeper endpoint that
 can change without notice.
 
+## Optimize your lineup
+
+```python
+from sleeper_sdk import optimal_lineup, set_optimal_lineup
+
+lineup = await optimal_lineup(
+    league_id="YOUR_LEAGUE_ID",
+    user_id="YOUR_USER_ID",
+)
+```
+
+`optimal_lineup` is read-only like `team`: it reports the highest-projected
+legal lineup for one week. The arguments match `team`'s (`league_id` and
+`user_id` may be positional; `week` and `scoring` are optional keywords), but
+`week` defaults to Sleeper's current editable lineup week, the same week
+`set_optimal_lineup` applies, rather than the displayed week. The result
+holds `league_id`, `user_id`, `week`, `scoring`,
+`total_projected_points`, and one `lineup` entry per active slot in league
+order:
+
+```python
+{
+    "slot": "FLEX",
+    "player_id": "11632",
+    "full_name": "Malik Nabers",
+    "positions": ["WR"],
+    "projected_points": 11.2,
+}
+```
+
+Positions and flex slots are chosen together so that no legal lineup
+projects more total points; players without a projection, for example on
+bye, start only when a slot would otherwise be empty, and slots no rostered
+player can legally fill hold `None` values. IR and taxi players are never
+selected. The call reads only Sleeper's public API.
+
+`set_optimal_lineup` computes the same optimum and applies it through the
+verified `swap` helper, one bench player and one starter at a time:
+
+```python
+result = await set_optimal_lineup(
+    league_id="YOUR_LEAGUE_ID",
+    user_id="YOUR_USER_ID",
+    headless=True,
+)
+```
+
+`user_id`, `scoring`, `auth_path`, `passkey_path`, and `headless` are
+keyword-only, exactly as for `swap`; supplying `passkey_path` enables one
+unattended login attempt before lineup work. Starters already in their
+optimal slot are left alone, and no browser opens at all when the lineup is
+already optimal. The return value contains `league_id`, `roster_id`,
+`week`, `scoring`, the ordered `swaps` applied as `player_in` and
+`player_out`, `starters_before`, `starters_after`, and
+`total_projected_points`. Every exchange is verified before the next one
+begins; if one fails, or the verified lineup stops following the plan because
+something else changed it, nothing further is applied and the error reports
+the progress. Inspect Sleeper before retrying, just as for `swap`. A lineup with
+an empty starting slot cannot be optimized this way, because a
+player-to-player swap cannot fill an empty slot; fill it in Sleeper first.
+
+Both are available as commands and recipes:
+
+```sh
+uv run python examples/use_sdk.py optimal-lineup --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID [--week 1] [--scoring half_ppr]
+uv run python examples/use_sdk.py set-optimal-lineup --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID [--headless]
+just optimal-lineup
+just set-optimal-lineup
+```
+
 ## Scope
 
 The browser controls target Sleeper's current desktop Classic NFL Team page,
 for the current season and supported editable week. Best Ball and other sports
 are unsupported. UI changes can require selector updates. There are no batch
-operations, scheduler, or optimizer. `team` is the only public read helper,
-and its projections come from an undocumented endpoint that can change without
+operations or scheduler; `set_optimal_lineup` applies one verified exchange at
+a time. `team` and `optimal_lineup` are the read-only helpers, and their
+projections come from an undocumented endpoint that can change without
 notice. Public API requests are read-only; all lineup changes go through
 Sleeper's UI.
 
@@ -239,6 +311,7 @@ between runs. The read/check/click sequence is not atomic with other actors.
 - `_api.py`: private public-API reads and validation for swaps and team reports.
 - `lineup.py`: one UI exchange and complete ordered verification.
 - `team.py`: read-only roster report of eligible slots and weekly projections.
+- `optimize.py`: optimal-lineup selection, swap planning, and application.
 - `examples/use_sdk.py`: explicit opt-in script commands.
 
 ## Manual validation — 2026-09-06
