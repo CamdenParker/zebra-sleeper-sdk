@@ -115,7 +115,7 @@ def _auth_directory(
         os.close(directory_fd)
 
 
-def _check_auth_file(info: os.stat_result) -> None:
+def _check_auth_file(info: os.stat_result, path: Path) -> None:
     if (
         not stat.S_ISREG(info.st_mode)
         or info.st_uid != os.getuid()
@@ -123,8 +123,11 @@ def _check_auth_file(info: os.stat_result) -> None:
         or info.st_nlink != 1
     ):
         raise RuntimeError(
-            "The auth file must be a regular file without hard links, owned by you with mode 0600. "
-            "Choose a new private auth_path and run login again."
+            f"Authentication file {path} must be a regular file without hard links, "
+            f"owned by you with mode 0600 (found mode {stat.S_IMODE(info.st_mode):04o}, "
+            f"owner {info.st_uid}, current user {os.getuid()}, links {info.st_nlink}). "
+            "Copy mounted secrets into a private writable directory with mode 0600 "
+            "before loading them."
         )
 
 
@@ -139,7 +142,7 @@ def _auth_lock(auth_path: Path) -> Iterator[None]:
             dir_fd=directory_fd,
         )
         try:
-            _check_auth_file(os.fstat(fd))
+            _check_auth_file(os.fstat(fd), path.with_name(path.name + ".lock"))
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -222,7 +225,7 @@ def _read_private_json(file_path: Path, *, label: str, passkey: bool = False) ->
         except FileNotFoundError:
             raise _MissingAuth(f"No saved {label}. " + _LOGIN_AGAIN) from None
         with os.fdopen(fd, "r", encoding="utf-8") as source:
-            _check_auth_file(os.fstat(source.fileno()))
+            _check_auth_file(os.fstat(source.fileno()), path)
             try:
                 return json.load(source)
             except (ValueError, UnicodeError):
@@ -244,7 +247,7 @@ def _write_private_json(
     ):
         try:
             _check_auth_file(
-                os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+                os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False), path
             )
         except FileNotFoundError:
             pass

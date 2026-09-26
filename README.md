@@ -136,17 +136,23 @@ indefinitely.
 
 Upload the contents of your local root `passkey.json` as a Render Secret File
 named `passkey.json`. For non-Docker services, Render makes it available directly
-in the service's root directory, matching the local layout:
+in the service's root directory, matching the local layout. Both native and
+Docker services also expose it at `/etc/secrets/passkey.json`.
+
+Use this cron command after installing dependencies and Chromium during the build:
 
 ```sh
-uv run python examples/use_sdk.py --passkey-path passkey.json set-optimal-lineup --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID --headless
+sh examples/render_cron.sh --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID
 ```
 
-Docker services expose secret files at `/etc/secrets/passkey.json`; copy the file
-to the root with mode `0600` before running the same command. Configure
-`SPORTSGAMEODDS_API_KEY` as a Render environment variable. The browser
-session remains at `~/.sleeper-sdk/auth.json`, where the SDK can create and refresh
-it. See [Render secret files](https://render.com/docs/configure-environment-variables#secret-files).
+The launcher copies the mounted secret into a new private directory under the
+runtime user's home, with mode `0600`, and stores the session there. This avoids
+depending on the mount's permissions, ownership, or link count. Each run logs in
+using the passkey as needed and removes its temporary credentials on exit. The
+mounted secret is unchanged. The runtime user's home must be writable.
+
+Configure `SPORTSGAMEODDS_API_KEY` as a Render environment variable. See
+[Render secret files](https://render.com/docs/configure-environment-variables#secret-files).
 
 ## Exchange two lineup slots
 
