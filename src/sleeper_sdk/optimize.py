@@ -672,6 +672,9 @@ async def set_optimal_lineup(
             snapshot["league"].get("scoring_settings"),
             scoring,
         )
+        # Candidates contain everything needed from these league-wide datasets.
+        # Release them before Chromium adds its own browser and renderer memory.
+        del players, projections
         target = _target_with_locks(
             candidates, slots, snapshot["starters"], started_teams
         )

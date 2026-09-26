@@ -152,6 +152,45 @@ mounted secret is unchanged. The runtime user's home must be writable.
 Configure `SPORTSGAMEODDS_API_KEY` as a Render environment variable. See
 [Render secret files](https://render.com/docs/configure-environment-variables#secret-files).
 
+### Cron memory sizing
+
+Use Render's **2 GB / 1 CPU** cron plan as the initial capacity after a 512 MiB
+out-of-memory failure. This is a sizing recommendation, not a measured Linux
+minimum. The job runs Python, Playwright's Node driver, and Chromium's browser
+and renderer processes. It uses one browser session and one page for the batch;
+an already-optimal lineup opens no browser.
+
+On September 26, 2026, a local macOS read-only profile fetched the actual weekly
+data, opened the authenticated roster, reloaded it once, and saved a temporary
+session. It did not submit lineup changes. Sampling the sum of process RSS every
+200 ms produced these approximate peaks:
+
+| Scenario | Sampled peak |
+| --- | ---: |
+| Python planning data loaded (across runs) | 165–216 MiB |
+| Fresh passkey login and roster, planning data retained | 1,297 MiB |
+| Saved session and roster, planning data released | 1,251 MiB |
+| Same saved-session setup, images/fonts/media blocked experimentally | 1,050 MiB |
+
+Summed RSS can count shared pages more than once, and macOS memory compression
+and browser builds differ from Linux. These figures support an initial capacity
+estimate; they do not establish Render's exact minimum or a guaranteed asset
+blocking reduction. The asset-blocking experiment is not enabled in the SDK.
+
+The optimizer releases the full player catalog and projections once roster
+candidates have been computed, before starting the browser. The cron launcher
+prints `Container lifetime peak memory: ... MiB` on exit when Linux exposes a
+cgroup peak counter. This includes browser subprocesses and kernel-accounted
+memory; it is not Python's memory alone. The counter covers the container's
+lifetime, and a container-wide OOM kill can prevent the final log from appearing.
+
+After deploying, use a successful run that actually opens the browser to measure
+capacity. Compare its peak with Render's Metrics page, and budget roughly 30%
+headroom above the highest peak across several representative runs. A no-swap
+run is not sufficient to size the browser workload. See
+[Render metrics](https://render.com/docs/service-metrics) and
+[cron pricing](https://render.com/pricing).
+
 ## Exchange two lineup slots
 
 ```python

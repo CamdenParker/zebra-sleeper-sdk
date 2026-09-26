@@ -4,7 +4,19 @@ set -eu
 cd "$(dirname "$0")/.."
 umask 077
 auth_dir="$(mktemp -d "$HOME/.sleeper-cron.XXXXXX")"
-trap 'rm -rf -- "$auth_dir"' EXIT
+cleanup() {
+    run_status=$?
+    # Linux accounts for the whole container, including Chromium's child processes.
+    for peak_file in /sys/fs/cgroup/memory.peak /sys/fs/cgroup/memory/memory.max_usage_in_bytes; do
+        if [ -r "$peak_file" ]; then
+            awk '{printf "Container lifetime peak memory: %.1f MiB\n", $1 / 1048576}' "$peak_file" >&2 || :
+            break
+        fi
+    done
+    rm -rf -- "$auth_dir"
+    exit "$run_status"
+}
+trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
