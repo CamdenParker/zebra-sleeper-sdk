@@ -73,11 +73,15 @@ registration in Sleeper; generating a local key alone does not register it.
    login to the same account in a fresh headless browser with no saved session.
    Only successful proof permits saving the credential and reporting success.
 
-The default credential file is `~/.sleeper-sdk/passkey.json`. It is separate from
-`auth.json`, carries the account ID, and uses the same private-directory and
-atomic-write protections. It is **not encrypted by the SDK** and grants account
-login access, not just permission to modify lineups. Keep both files outside Git
-and exclude them from logs, traces, and shared artifacts.
+The default credential file is `passkey.json` in the working directory (the
+project root when running its commands). This exact root file is gitignored and
+must have mode `0600`; its containing project directory need not be private.
+Other passkey locations require a private directory (`0700`) outside repositories.
+Browser session snapshots still belong outside repositories. The credential
+carries the account ID and uses atomic-write protections. It is **not encrypted
+by the SDK** and grants account login access, not just permission to modify
+lineups. Keep both files out of Git and exclude them from logs, traces, and
+shared artifacts.
 
 Enrollment refuses to overwrite an existing passkey file. To replace a passkey,
 enroll to a new `--passkey-path`, verify it, update callers to use that path, then
@@ -96,10 +100,10 @@ Both paths have the defaults above; CLI path options go **before** the subcomman
 uv run python examples/use_sdk.py check-auth --user-id YOUR_USER_ID
 
 # Enable one passkey recovery attempt when the session is missing or logged out.
-uv run python examples/use_sdk.py --passkey-path ~/.sleeper-sdk/passkey.json check-auth --user-id YOUR_USER_ID
+uv run python examples/use_sdk.py --passkey-path passkey.json check-auth --user-id YOUR_USER_ID
 
 # Prove a fresh login without loading saved session state into the browser.
-uv run python examples/use_sdk.py --passkey-path ~/.sleeper-sdk/passkey.json check-auth --user-id YOUR_USER_ID --fresh
+uv run python examples/use_sdk.py --passkey-path passkey.json check-auth --user-id YOUR_USER_ID --fresh
 ```
 
 `check_auth` returns `AuthStatus`, a typed dictionary containing `user_id` and
@@ -111,7 +115,7 @@ authentication and account verification succeed. Malformed or unsafe files are
 errors, even during a fresh check.
 
 Opt in to recovery on a lineup exchange by passing
-`passkey_path=Path.home() / ".sleeper-sdk" / "passkey.json"` to `swap` or
+`passkey_path=Path("passkey.json")` to `swap` or
 `swaps`, or by supplying the CLI's `--passkey-path` before `swap`, `swaps`, or
 `set-optimal-lineup`. Existing callers without a passkey path retain
 session-only authentication. A configured missing, malformed, or wrong-account
@@ -127,6 +131,22 @@ relying on unattended operation, securely provision the files on your chosen hos
 and run a fresh check under its actual runtime account after a reboot. Sleeper
 can revoke credentials or change its login flow, so access is not guaranteed
 indefinitely.
+
+### Render cron secret file
+
+Upload the contents of your local root `passkey.json` as a Render Secret File
+named `passkey.json`. For non-Docker services, Render makes it available directly
+in the service's root directory, matching the local layout:
+
+```sh
+uv run python examples/use_sdk.py --passkey-path passkey.json set-optimal-lineup --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID --headless
+```
+
+Docker services expose secret files at `/etc/secrets/passkey.json`; copy the file
+to the root with mode `0600` before running the same command. Configure
+`SPORTSGAMEODDS_API_KEY` as a Render environment variable. The browser
+session remains at `~/.sleeper-sdk/auth.json`, where the SDK can create and refresh
+it. See [Render secret files](https://render.com/docs/configure-environment-variables#secret-files).
 
 ## Exchange two lineup slots
 

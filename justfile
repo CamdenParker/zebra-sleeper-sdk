@@ -19,7 +19,7 @@ logout:
 
 # Prove headless passkey login from a fresh browser and save the recovered session.
 login-unattended:
-    uv run python examples/use_sdk.py --passkey-path "$HOME/.sleeper-sdk/passkey.json" check-auth --user-id {{ user_id }} --fresh
+    uv run python examples/use_sdk.py --passkey-path passkey.json check-auth --user-id {{ user_id }} --fresh
 
 # Exchange Burrow and Maye; running twice restores their original positions.
 swap-burrow-maye:
@@ -43,4 +43,4 @@ optimal-lineup:
 
 # Compute the optimal lineup and apply it through verified swaps.
 set-optimal-lineup *args:
-    uv run python examples/use_sdk.py set-optimal-lineup --league-id {{ league_id }} --user-id {{ user_id }} {{ args }}
+    uv run python examples/use_sdk.py --passkey-path passkey.json set-optimal-lineup --league-id {{ league_id }} --user-id {{ user_id }} {{ args }}

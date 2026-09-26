@@ -17,6 +17,8 @@ auth*.json
 *storage_state*.json
 *storageState*.json
 credentials*.json
+# Local passkey matching Render's secret-file name
+/passkey.json
 secrets/
 .sleeper-sdk/
 .auth/
