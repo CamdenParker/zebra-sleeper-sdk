@@ -19,28 +19,28 @@ logout:
 
 # Prove headless passkey login from a fresh browser and save the recovered session.
 login-unattended:
-    uv run python examples/use_sdk.py --passkey-path "$HOME/.sleeper-sdk/passkey.json" check-auth --user-id {{user_id}} --fresh
+    uv run python examples/use_sdk.py --passkey-path "$HOME/.sleeper-sdk/passkey.json" check-auth --user-id {{ user_id }} --fresh
 
 # Exchange Burrow and Maye; running twice restores their original positions.
 swap-burrow-maye:
-    uv run python examples/use_sdk.py swap --league-id {{league_id}} --user-id {{user_id}} --player-a-id {{burrow_id}} --player-b-id {{maye_id}}
+    uv run python examples/use_sdk.py swap --league-id {{ league_id }} --user-id {{ user_id }} --player-a-id {{ burrow_id }} --player-b-id {{ maye_id }}
 
 # Expect rejection: Dowdle cannot replace Maye at QB (two bench players also reject).
 swap-dowdle-maye:
-    uv run python examples/use_sdk.py swap --league-id {{league_id}} --user-id {{user_id}} --player-a-id {{dowdle_id}} --player-b-id {{maye_id}}
+    uv run python examples/use_sdk.py swap --league-id {{ league_id }} --user-id {{ user_id }} --player-a-id {{ dowdle_id }} --player-b-id {{ maye_id }}
 
 # Read-only report of every rostered player's slots and weekly projections.
 team:
-    uv run python examples/use_sdk.py team --league-id {{league_id}} --user-id {{user_id}}
+    uv run python examples/use_sdk.py team --league-id {{ league_id }} --user-id {{ user_id }}
 
 # Read-only roster props with source books and separate Sleeper projections.
 team-props:
-    uv run python examples/use_sdk.py team-props --league-id {{league_id}} --user-id {{user_id}}
+    uv run python examples/use_sdk.py team-props --league-id {{ league_id }} --user-id {{ user_id }}
 
 # Print the highest-projected legal lineup for the current editable week.
 optimal-lineup:
-    uv run python examples/use_sdk.py optimal-lineup --league-id {{league_id}} --user-id {{user_id}}
+    uv run python examples/use_sdk.py optimal-lineup --league-id {{ league_id }} --user-id {{ user_id }}
 
 # Compute the optimal lineup and apply it through verified swaps.
-set-optimal-lineup:
-    uv run python examples/use_sdk.py set-optimal-lineup --league-id {{league_id}} --user-id {{user_id}}
+set-optimal-lineup *args:
+    uv run python examples/use_sdk.py set-optimal-lineup --league-id {{ league_id }} --user-id {{ user_id }} {{ args }}
