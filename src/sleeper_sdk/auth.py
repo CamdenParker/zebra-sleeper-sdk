@@ -33,7 +33,7 @@ from playwright.async_api import (
 )
 
 DEFAULT_AUTH_PATH = Path.home() / ".sleeper-sdk" / "auth.json"
-DEFAULT_PASSKEY_PATH = Path.cwd() / "passkey.json"
+DEFAULT_PASSKEY_PATH = Path.home() / ".sleeper-sdk" / "passkey.json"
 _LOGIN_AGAIN = (
     "Run await sleeper_sdk.login() again (with the same auth_path, if customized)."
 )
@@ -58,7 +58,7 @@ class _MissingAuth(RuntimeError):
 
 @contextmanager
 def _auth_directory(
-    auth_path: str | Path, *, create: bool = False, passkey: bool = False
+    auth_path: str | Path, *, create: bool = False
 ) -> Iterator[tuple[Path, int]]:
     """Open a private directory without following any path-component symlinks."""
     path = Path(os.path.abspath(Path(auth_path).expanduser()))
@@ -66,7 +66,6 @@ def _auth_directory(
         raise RuntimeError("Choose an auth_path outside the SDK and all repositories.")
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     directory_fd = os.open(path.anchor, flags)
-    project_passkey = passkey and path == Path.cwd() / "passkey.json"
     try:
         for part in path.parent.parts[1:]:
             try:
@@ -74,10 +73,7 @@ def _auth_directory(
             except FileNotFoundError:
                 pass
             else:
-                raise RuntimeError(
-                    "Keep authentication outside repositories; passkeys may use "
-                    "passkey.json directly at the repository root."
-                )
+                raise RuntimeError("Keep authentication outside repositories.")
             if create:
                 try:
                     os.mkdir(part, 0o700, dir_fd=directory_fd)
@@ -91,16 +87,9 @@ def _auth_directory(
         except FileNotFoundError:
             pass
         else:
-            if not (passkey and path.name == "passkey.json"):
-                raise RuntimeError(
-                    "Keep authentication outside repositories; passkeys may use "
-                    "passkey.json directly at the repository root."
-                )
-            project_passkey = True
+            raise RuntimeError("Keep authentication outside repositories.")
         info = os.fstat(directory_fd)
-        if info.st_uid != os.getuid() or (
-            not project_passkey and stat.S_IMODE(info.st_mode) & 0o077
-        ):
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
             raise RuntimeError(
                 "The auth directory must be owned by you and private (0700). "
                 "Choose a new dedicated directory; existing directories are never chmodded."
@@ -214,8 +203,8 @@ def _validate_storage_state(state: Any) -> StorageState:
     return cast(StorageState, state)
 
 
-def _read_private_json(file_path: Path, *, label: str, passkey: bool = False) -> Any:
-    with _auth_directory(file_path, passkey=passkey) as (path, directory_fd):
+def _read_private_json(file_path: Path, *, label: str) -> Any:
+    with _auth_directory(file_path) as (path, directory_fd):
         try:
             fd = os.open(
                 path.name,
@@ -238,13 +227,8 @@ def _load_storage_state(auth_path: Path = DEFAULT_AUTH_PATH) -> StorageState:
     )
 
 
-def _write_private_json(
-    file_path: Path, value: Any, *, overwrite: bool = True, passkey: bool = False
-) -> None:
-    with _auth_directory(file_path, create=True, passkey=passkey) as (
-        path,
-        directory_fd,
-    ):
+def _write_private_json(file_path: Path, value: Any, *, overwrite: bool = True) -> None:
+    with _auth_directory(file_path, create=True) as (path, directory_fd):
         try:
             _check_auth_file(
                 os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False), path
@@ -309,7 +293,7 @@ async def _save_storage_state(
 
 def _load_passkey(passkey_path: Path, user_id: str) -> VirtualCredential:
     try:
-        record = _read_private_json(passkey_path, label="Sleeper passkey", passkey=True)
+        record = _read_private_json(passkey_path, label="Sleeper passkey")
     except _MissingAuth:
         raise RuntimeError(
             "No saved Sleeper passkey. Run enroll_passkey() first or correct passkey_path."
@@ -533,7 +517,7 @@ async def enroll_passkey(
     _validate_user_id(user_id)
     _validate_paths(auth_path, passkey_path)
     with _auth_lock(auth_path):
-        with _auth_directory(passkey_path, create=True, passkey=True) as (
+        with _auth_directory(passkey_path, create=True) as (
             path,
             directory_fd,
         ):
@@ -611,7 +595,6 @@ async def enroll_passkey(
                     passkey_path,
                     {"version": 1, "user_id": user_id, "credential": credential},
                     overwrite=False,
-                    passkey=True,
                 )
                 await _save_storage_state(context, auth_path)
             except (RuntimeError, ValueError) as exc:
