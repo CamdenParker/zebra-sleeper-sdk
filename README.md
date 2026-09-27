@@ -196,11 +196,14 @@ and run a fresh check under its actual runtime account after a reboot. Sleeper
 can revoke credentials or change its login flow, so access is not guaranteed
 indefinitely.
 
-### Render cron secret file
+### Render cron secret files
 
-Upload the contents of `~/.sleeper-sdk/passkey.json` as a Render Secret File
-named `passkey.json`. Both native and Docker services expose it at
-`/etc/secrets/passkey.json`, which the launcher uses as its source.
+Upload these two Render Secret Files:
+
+| Local file | Secret File name | Launcher source |
+| --- | --- | --- |
+| `~/.sleeper-sdk/passkey.json` | `passkey.json` | `/etc/secrets/passkey.json` |
+| `~/.sleeper-sdk/espn.json` | `espn.json` | `/etc/secrets/espn.json` |
 
 Use this cron command after installing dependencies and Chromium during the build:
 
@@ -208,11 +211,20 @@ Use this cron command after installing dependencies and Chromium during the buil
 sh examples/render_cron.sh --league-id YOUR_LEAGUE_ID --user-id YOUR_USER_ID
 ```
 
-The launcher copies the mounted secret into a new private directory under the
-runtime user's home, with mode `0600`, and stores the session there. This avoids
-depending on the mount's permissions, ownership, or link count. Each run logs in
-using the passkey as needed and removes its temporary credentials on exit. The
-mounted secret is unchanged. The runtime user's home must be writable.
+The existing command arguments configure Sleeper. ESPN defaults to league
+`107649966`, team `10`; override them with Render environment variables
+`ESPN_LEAGUE_ID` and `ESPN_TEAM_ID` when needed.
+
+The launcher copies both mounted secrets into a new private directory under the
+runtime user's home, with mode `0600`, before running either optimizer. Sleeper
+runs first and ESPN second; an optimizer failure still allows the other to run,
+and any failure makes the job exit nonzero. Each platform prints its name before
+running. Temporary credentials and the Sleeper session are removed on exit;
+mounted secrets are unchanged. The runtime user's home must be writable.
+
+Sleeper recovers authentication through its passkey as needed. When ESPN's
+cookies expire, run `just espn-login` locally and replace the Render `espn.json`
+Secret File with the refreshed file.
 
 Configure `SPORTSGAMEODDS_API_KEY` as a Render environment variable. See
 [Render secret files](https://render.com/docs/configure-environment-variables#secret-files).
