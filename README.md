@@ -27,6 +27,7 @@ The included commands target league `107649966`, team `10`:
 ```sh
 just espn-login
 just espn-check-auth
+just espn-team-props
 just espn-optimal-lineup
 just espn-set-optimal-lineup
 ```
@@ -39,6 +40,15 @@ helpers (directory `0700`, file `0600`). The SDK does not collect your password.
 These cookies are the persistent credential; they can expire or be revoked.
 Run login again when authentication expires. ESPN software passkey recovery is
 not implemented.
+
+`just espn-team-props` prints JSON for every rostered player, including bench
+and IR players. Each stat keeps the sportsbook `prop` (including source books)
+beside its separate `espn_projection`; missing values are `null`. The report
+also includes ESPN's native projected fantasy points. It reads your saved ESPN
+credentials and requires `SPORTSGAMEODDS_API_KEY` for current or future weeks.
+It opens no browser and changes no lineup. Use `just espn-team-props --week 2`
+for historical roster projections without sportsbook props, or redirect the
+JSON to a file with `just espn-team-props > espn-props.json`.
 
 Both optimization commands require `SPORTSGAMEODDS_API_KEY`, as the Sleeper
 optimizer does. The read-only command reports the best legal lineup using

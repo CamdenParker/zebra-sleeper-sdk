@@ -55,6 +55,10 @@ espn-login:
 espn-check-auth:
     uv run python examples/use_espn.py check-auth --league-id {{ espn_league_id }} --team-id {{ espn_team_id }}
 
+# Read-only roster props with source books and separate ESPN projections.
+espn-team-props *args:
+    uv run python examples/use_espn.py team-props --league-id {{ espn_league_id }} --team-id {{ espn_team_id }} {{ args }}
+
 # Print the prop-informed optimal ESPN lineup without making changes.
 espn-optimal-lineup *args:
     uv run python examples/use_espn.py optimal-lineup --league-id {{ espn_league_id }} --team-id {{ espn_team_id }} {{ args }}

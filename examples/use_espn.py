@@ -6,7 +6,13 @@ import json
 import sys
 from pathlib import Path
 
-from sleeper_sdk.espn import check_auth, login, optimal_lineup, set_optimal_lineup
+from sleeper_sdk.espn import (
+    check_auth,
+    login,
+    optimal_lineup,
+    set_optimal_lineup,
+    team_props,
+)
 from sleeper_sdk.espn.auth import DEFAULT_AUTH_PATH
 
 
@@ -17,6 +23,7 @@ def main() -> None:
     for name, help_text in (
         ("login", "Open ESPN and save verified authentication after you sign in."),
         ("check-auth", "Verify saved authentication and team ownership."),
+        ("team-props", "Print roster props beside ESPN weekly stat projections."),
         ("optimal-lineup", "Print the optimal lineup without making changes."),
         ("set-optimal-lineup", "Compute, apply, and verify the optimal lineup."),
     ):
@@ -24,7 +31,7 @@ def main() -> None:
         command.add_argument("--league-id", type=int, required=True)
         command.add_argument("--team-id", type=int, required=True)
         command.add_argument("--season", type=int)
-        if name == "optimal-lineup":
+        if name in {"team-props", "optimal-lineup"}:
             command.add_argument("--week", type=int)
     args = parser.parse_args()
     if args.command is None:
@@ -33,11 +40,12 @@ def main() -> None:
     functions = {
         "login": login,
         "check-auth": check_auth,
+        "team-props": team_props,
         "optimal-lineup": optimal_lineup,
         "set-optimal-lineup": set_optimal_lineup,
     }
     kwargs = {"season": args.season, "auth_path": args.auth_path}
-    if args.command == "optimal-lineup":
+    if args.command in {"team-props", "optimal-lineup"}:
         kwargs["week"] = args.week
     result = asyncio.run(
         functions[args.command](args.league_id, args.team_id, **kwargs)
