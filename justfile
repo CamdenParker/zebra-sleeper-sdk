@@ -3,6 +3,8 @@ user_id := "997952604384608256"
 burrow_id := "6770"
 maye_id := "11564"
 dowdle_id := "7021"
+espn_league_id := "107649966"
+espn_team_id := "10"
 
 # List commands without changing the lineup.
 default:
@@ -44,3 +46,19 @@ optimal-lineup:
 # Compute the optimal lineup and apply it through verified swaps.
 set-optimal-lineup *args:
     uv run python examples/use_sdk.py --passkey-path "$HOME/.sleeper-sdk/passkey.json" set-optimal-lineup --league-id {{ league_id }} --user-id {{ user_id }} {{ args }}
+
+# Sign in interactively and persist verified ESPN session cookies.
+espn-login:
+    uv run python examples/use_espn.py login --league-id {{ espn_league_id }} --team-id {{ espn_team_id }}
+
+# Verify saved ESPN authentication without changing the lineup.
+espn-check-auth:
+    uv run python examples/use_espn.py check-auth --league-id {{ espn_league_id }} --team-id {{ espn_team_id }}
+
+# Print the prop-informed optimal ESPN lineup without making changes.
+espn-optimal-lineup *args:
+    uv run python examples/use_espn.py optimal-lineup --league-id {{ espn_league_id }} --team-id {{ espn_team_id }} {{ args }}
+
+# Apply and verify the prop-informed ESPN lineup with saved authentication.
+espn-set-optimal-lineup:
+    uv run python examples/use_espn.py set-optimal-lineup --league-id {{ espn_league_id }} --team-id {{ espn_team_id }}

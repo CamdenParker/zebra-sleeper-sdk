@@ -17,6 +17,7 @@ auth*.json
 *storage_state*.json
 *storageState*.json
 credentials*.json
+/espn.json
 # Ignore any leftover or manually copied passkey
 /passkey.json
 secrets/

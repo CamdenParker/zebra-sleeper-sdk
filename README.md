@@ -9,12 +9,77 @@ exact lineup slots. Python
 3.11 or newer is required; development is pinned to Python 3.13.7. The only
 runtime dependencies are `httpx` and `playwright`.
 
+ESPN support is isolated in `sleeper_sdk.espn`; the existing Sleeper functions
+and commands retain their behavior. ESPN uses the same prop scoring and legal
+slot-assignment helpers with ESPN's weekly projections and league settings.
+
 ## Setup
 
 ```sh
 uv sync --locked
 uv run playwright install chromium
 ```
+
+## ESPN league
+
+The included commands target league `107649966`, team `10`:
+
+```sh
+just espn-login
+just espn-check-auth
+just espn-optimal-lineup
+just espn-set-optimal-lineup
+```
+
+`espn-login` opens a dedicated Chromium window. Complete sign-in and any
+verification yourself. The SDK verifies that the account owns the requested
+team before saving the `SWID` and `espn_s2` session cookies to
+`~/.sleeper-sdk/espn.json`, using the existing private-directory and atomic-write
+helpers (directory `0700`, file `0600`). The SDK does not collect your password.
+These cookies are the persistent credential; they can expire or be revoked.
+Run login again when authentication expires. ESPN software passkey recovery is
+not implemented.
+
+Both optimization commands require `SPORTSGAMEODDS_API_KEY`, as the Sleeper
+optimizer does. The read-only command reports the best legal lineup using
+bookmaker props, ESPN stat projections to fill missing markets, and ESPN's
+native projected fantasy totals as the secondary ranking. The scoring weights
+and slot counts come from your league, including PPR and its RB/WR/TE flex.
+`total_projected_points` sums ESPN projections rather than the prop ranking
+score. ESPN player IDs are independent of Sleeper player IDs.
+
+```python
+from sleeper_sdk.espn import login, optimal_lineup, set_optimal_lineup
+
+await login(107649966, 10)  # Interactive, once per saved session.
+report = await optimal_lineup(107649966, 10)  # Read-only.
+result = await set_optimal_lineup(107649966, 10)  # Changes the lineup.
+```
+
+These functions accept `season=` and `auth_path=`; the read-only optimizer also
+accepts `week=`. The season defaults to the current NFL season and the week to
+ESPN's current editable scoring period. For other leagues, use
+`uv run python examples/use_espn.py COMMAND --league-id ID --team-id ID`.
+Place a custom `--auth-path` before the command. Keep credentials outside
+repositories and shared artifacts.
+
+Past-week reports use ESPN's historical roster and projections without pregame
+props. Position-specific overrides on the core offensive scoring stats fall
+back to native fantasy projections for the affected players. Current-week
+optimization requires individual-game lineup locks and a reliable ESPN schedule.
+
+The setter preserves locked starters and excludes locked bench players, using
+ESPN's NFL schedule and native lock information independently of bookmaker
+coverage. IR players remain untouched. It rechecks ownership, league settings,
+week, roster, and locks before submitting one lineup transaction, then verifies
+every rostered player's slot from a fresh ESPN response. Duplicate slots such
+as the two RB positions are equivalent in ESPN. An already-optimal lineup makes
+no write request. A failed verification can mean the change applied; inspect
+ESPN before retrying. The setter never automatically retries a submission.
+
+ESPN's API is undocumented; response and transaction formats can change.
+The implementation references the [espn-api stat mappings](https://github.com/cwendt94/espn-api/blob/master/espn_api/football/constant.py)
+and a [captured ESPN lineup transaction](https://github.com/tlo1216/espn-fantasy-mcp#the-lineup-move-payload).
 
 ## Sign in
 
