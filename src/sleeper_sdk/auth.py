@@ -30,6 +30,7 @@ from playwright.async_api import (
 )
 from playwright.async_api import (
     Error as PlaywrightError,
+    TimeoutError as PlaywrightTimeoutError,
 )
 
 DEFAULT_AUTH_PATH = Path.home() / ".sleeper-sdk" / "auth.json"
@@ -482,11 +483,16 @@ async def _passkey_login(
             page = await context.new_page()
             await page.goto(_PROFILE_URL, wait_until="domcontentloaded")
             dialog = page.get_by_role("dialog", name="Sign In - Sleeper", exact=True)
-            if not await dialog.is_visible():
-                await page.get_by_role("button", name="Log in", exact=True).click()
-            await dialog.get_by_role(
-                "button", name="Sign in with passkey", exact=True
-            ).click()
+            try:
+                if not await dialog.is_visible():
+                    await page.get_by_role("button", name="Log in", exact=True).click()
+                await dialog.get_by_role(
+                    "button", name="Sign in with passkey", exact=True
+                ).click()
+            except PlaywrightTimeoutError:
+                # Passkey sign-in can finish before the button is located.
+                # Only the verified profile below establishes authentication.
+                pass
             actual_id = await _authenticated_user_id(
                 page, navigate=False, timeout=60_000
             )
