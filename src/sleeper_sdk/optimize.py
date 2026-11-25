@@ -275,12 +275,13 @@ def _eligible(positions: frozenset[str], slot: str) -> bool:
 
 
 def _rank(row: dict) -> tuple:
-    """Book-informed score first, then Sleeper projection, with nulls last."""
+    """Rank by prop score or native projection, then projection to break ties."""
     prop_score = row["prop_score"]
     points = row["projected_points"]
+    score = prop_score if prop_score is not None else points
     return (
-        prop_score is None,
-        -prop_score if prop_score is not None else 0.0,
+        score is None,
+        -score if score is not None else 0.0,
         points is None,
         -points if points is not None else 0.0,
         row["full_name"],
@@ -344,8 +345,8 @@ def _select(candidates: list[dict], slots: list[str]) -> list[dict | None]:
 
     Candidates are seated best rank first, and a player is kept only
     when everyone chosen so far can still occupy distinct slots. This greedy
-    basis of the slot-assignment matroid picks the best ranked set; prop scores
-    take priority over Sleeper projections. Free base-position slots are tried
+    basis of the slot-assignment matroid picks the best ranked set; missing prop
+    scores fall back to native projections. Free base-position slots are tried
     before flex slots, so the arrangement usually keeps flex slots for the
     overflow.
     """
@@ -517,7 +518,8 @@ async def optimal_lineup(
     `prop_score` is an approximate league-scored fantasy point total derived
     from available bookmaker lines, with Sleeper stat projections filling
     missing markets; it is `None` without a relevant prop. Players rank first
-    by prop score (nulls last), then Sleeper projected points. The returned
+    by prop score when available, otherwise Sleeper projected points, with
+    missing scores last and Sleeper projected points breaking ties. The returned
     `total_projected_points` always sums Sleeper projections. `week` defaults
     to Sleeper's current editable lineup week (the same week
     `set_optimal_lineup` applies) and may be any

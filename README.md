@@ -53,7 +53,8 @@ JSON to a file with `just espn-team-props > espn-props.json`.
 Both optimization commands require `SPORTSGAMEODDS_API_KEY`, as the Sleeper
 optimizer does. The read-only command reports the best legal lineup using
 bookmaker props, ESPN stat projections to fill missing markets, and ESPN's
-native projected fantasy totals as the secondary ranking. The scoring weights
+native projected fantasy totals when no prop score exists and to break ties.
+The scoring weights
 and slot counts come from your league, including PPR and its RB/WR/TE flex.
 `total_projected_points` sums ESPN projections rather than the prop ranking
 score. ESPN player IDs are independent of Sleeper player IDs.
@@ -469,8 +470,9 @@ lines and touchdown odds, with Sleeper stat projections filling missing
 markets. League scoring weights are used when available; reception scoring
 defaults to the league setting, includes position reception bonuses, and can
 be selected with `scoring`. Players
-rank first by `prop_score` (missing scores last), then by Sleeper
-`projected_points` (missing projections last). The returned
+rank by `prop_score` when available, otherwise by Sleeper `projected_points`,
+on the same numerical scale. Players missing both scores rank last;
+Sleeper `projected_points` breaks ties. The returned
 `total_projected_points` sums Sleeper projections, so it is not the ranking
 score. Past weeks use Sleeper projections alone; their pregame odds are not
 available on the SportsGameOdds free tier. Positions and flex slots are chosen
